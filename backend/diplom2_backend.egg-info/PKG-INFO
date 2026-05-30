@@ -1,0 +1,19 @@
+Metadata-Version: 2.4
+Name: diplom2-backend
+Version: 0.1.0
+Summary: Driving efficiency analytics FastAPI MVP
+Requires-Python: >=3.11
+Requires-Dist: alembic>=1.13.0
+Requires-Dist: email-validator>=2.1.0
+Requires-Dist: fastapi>=0.111.0
+Requires-Dist: httpx>=0.27.0
+Requires-Dist: bcrypt<5
+Requires-Dist: psycopg[binary]>=3.1.18
+Requires-Dist: pydantic-settings>=2.2.1
+Requires-Dist: PyJWT>=2.8.0
+Requires-Dist: python-multipart>=0.0.9
+Requires-Dist: sqlalchemy>=2.0.29
+Requires-Dist: uvicorn[standard]>=0.29.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.1.1; extra == "dev"
+Requires-Dist: pytest-cov>=5.0.0; extra == "dev"

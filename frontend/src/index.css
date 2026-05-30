@@ -1,0 +1,95 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-ink: 8 13 20;
+  --color-canvas: 13 20 31;
+  --color-panel: 20 30 44;
+  --color-panel-strong: 28 41 59;
+  --color-line: 72 87 110;
+  --color-muted: 149 162 184;
+  --color-cream: 244 235 211;
+  --color-brass: 216 167 83;
+  --color-ember: 232 93 55;
+  --color-signal: 86 216 214;
+  --color-success: 79 207 124;
+  --color-warning: 242 188 73;
+  --color-danger: 231 78 78;
+
+  --radius-card: 1.5rem;
+  --radius-pill: 999px;
+  --shadow-panel: 0 1.5rem 4rem rgb(0 0 0 / 0.28);
+  --shadow-glow: 0 0 4rem rgb(var(--color-signal) / 0.18);
+  --image-cockpit-grid: linear-gradient(rgb(var(--color-line) / 0.12) 1px, transparent 1px), linear-gradient(90deg, rgb(var(--color-line) / 0.12) 1px, transparent 1px);
+  --image-radar-glow: radial-gradient(circle at top left, rgb(var(--color-signal) / 0.22), transparent 34rem), radial-gradient(circle at bottom right, rgb(var(--color-brass) / 0.18), transparent 30rem);
+  --image-grain: radial-gradient(circle at 20% 20%, rgb(255 255 255 / 0.04), transparent 0.75rem), radial-gradient(circle at 80% 0%, rgb(255 255 255 / 0.03), transparent 0.8rem);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: rgb(var(--color-canvas));
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  font-family: "IBM Plex Sans", Verdana, sans-serif;
+  color: rgb(var(--color-cream));
+  background:
+    var(--image-radar-glow),
+    var(--image-cockpit-grid),
+    rgb(var(--color-canvas));
+  background-size: auto, 3rem 3rem, auto;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+::selection {
+  color: rgb(var(--color-ink));
+  background: rgb(var(--color-signal));
+}
+
+@layer components {
+  .surface-card {
+    @apply rounded-card border border-line/30 bg-panel/80 shadow-panel backdrop-blur-xl;
+  }
+
+  .control-field {
+    @apply w-full rounded-2xl border border-line/40 bg-ink/35 px-4 py-3 text-sm text-cream outline-none transition focus:border-signal focus:ring-2 focus:ring-signal/20;
+  }
+
+  .primary-action {
+    @apply inline-flex items-center justify-center rounded-pill bg-signal px-5 py-3 text-sm font-bold text-ink shadow-glow transition hover:-translate-y-0.5 hover:bg-cream focus:outline-none focus:ring-2 focus:ring-signal/40;
+  }
+
+  .secondary-action {
+    @apply inline-flex items-center justify-center rounded-pill border border-line/40 bg-panelStrong/80 px-4 py-2 text-sm font-semibold text-cream transition hover:border-signal/70 hover:text-signal;
+  }
+
+  .section-label {
+    @apply text-xs font-bold uppercase tracking-widest text-brass;
+  }
+
+  .data-table {
+    @apply min-w-full divide-y divide-line/25 text-left text-sm;
+  }
+
+  .data-table th {
+    @apply bg-ink/25 px-4 py-3 text-xs font-bold uppercase tracking-widest text-muted;
+  }
+
+  .data-table td {
+    @apply px-4 py-4 text-cream/90;
+  }
+}
