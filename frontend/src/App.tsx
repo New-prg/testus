@@ -5,6 +5,7 @@ import { AuthProvider } from './components/layout/AuthProvider';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
+import { MlAnalyticsPage } from './pages/MlAnalyticsPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { VehiclesPage } from './pages/VehiclesPage';
@@ -19,6 +20,7 @@ export default function App() {
           <Route element={<AppShell />}>
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/vehicles" element={<VehiclesPage />} />
+            <Route path="/ml" element={<MlAnalyticsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
           </Route>
         </Route>

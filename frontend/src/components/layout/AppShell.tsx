@@ -6,6 +6,7 @@ import { useAuth } from './AuthProvider';
 const navItems = [
   { label: 'Дашборд', path: '/dashboard' },
   { label: 'Машины', path: '/vehicles' },
+  { label: 'ML', path: '/ml' },
   { label: 'Отчёты', path: '/reports' },
 ];
 
