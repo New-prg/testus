@@ -86,7 +86,15 @@ This keeps the same admin/demo access path, but replaces the shared fleet datase
 - Vehicles: `GET /api/vehicles`, `GET /api/vehicles/{id}`, `GET /api/vehicles/{id}/sensors`, `GET /api/vehicles/{id}/metrics`, `GET /api/vehicles/{id}/ratings`
 - Dashboard: `GET /api/dashboard/summary`, `GET /api/dashboard/timeseries`, `GET /api/dashboard/comparison`, `GET /api/dashboard/problem-vehicles`
 - Reports: `GET /api/reports/fleet`, `GET /api/reports/vehicle/{id}`, `GET /api/reports/export/csv`
-- ML: `POST /api/ml/recalculate`, `GET /api/ml/anomalies`, `GET /api/ml/clusters`
+- ML: `POST /api/ml/recalculate` (admin only), `GET /api/ml/model-comparison`, `GET /api/ml/anomalies`, `GET /api/ml/clusters`, `GET /api/ml/forecasts`, `GET /api/ml/explanations/{vehicle_id}`
+
+## Local dataset import
+
+```bash
+docker compose exec backend python -m app.cli import-dataset --path /app/path/to/dataset.csv
+```
+
+Supported formats: CSV, JSON, JSONL. Imported rows are normalized into `Vehicle`, `VehicleSensor`, and `SensorReading`, then daily metrics and ratings are recalculated for the imported period.
 
 ## Known limitations
 

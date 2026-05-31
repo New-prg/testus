@@ -41,6 +41,15 @@ uvicorn app.main:app --reload
 - `/api/vehicles`, `/{id}`, `/{id}/sensors`, `/{id}/metrics`, `/{id}/ratings`
 - `/api/dashboard/summary?period=week`, `/timeseries`, `/comparison`, `/problem-vehicles`
 - `/api/reports/fleet`, `/vehicle/{id}`, `/export/csv`
-- `/api/ml/recalculate`, `/anomalies`, `/clusters`
+- `/api/ml/recalculate` (admin only), `/model-comparison`, `/anomalies`, `/clusters`, `/forecasts`, `/explanations/{vehicle_id}`
+
+## Dataset import
+
+```bash
+cd backend
+python -m app.cli import-dataset --path ./path/to/dataset.csv
+```
+
+Supported formats: CSV, JSON, JSONL. The importer writes normalized vehicles, sensors, and readings into the existing tables and then recalculates daily metric and rating windows for the imported time range.
 
 Pilot-GPS calibrated historical sensor values are still treated as an integration blocker until official endpoint semantics are confirmed; demo mode and `raw_json` preservation remain the default safe path.

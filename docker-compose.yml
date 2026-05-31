@@ -9,6 +9,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d driving_analytics"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   backend:
     build:
@@ -16,7 +21,8 @@ services:
     env_file:
       - .env
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     restart: on-failure
     ports:
       - "8000:8000"
