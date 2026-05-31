@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime, timedelta
 from random import Random
+import time
 from typing import Any
 
 import httpx
@@ -8,9 +9,11 @@ import httpx
 from app.config.analytics_sensors import ANALYTICS_SENSORS
 from app.config.rating_profile import CAR_TYPE_KAMAZ, CAR_TYPE_NOT_KAMAZ
 from app.core.config import Settings, get_settings
+from app.services.pilot_gps.normalization import extract_status_items, extract_vehicle_list, first_not_empty
+from app.services.telemetry.provider import TelemetryProvider
 
 
-class PilotGpsClient(ABC):
+class PilotGpsClient(TelemetryProvider, ABC):
     @abstractmethod
     def list_vehicles(self) -> list[dict[str, Any]]:
         raise NotImplementedError
@@ -165,9 +168,7 @@ class HttpPilotGpsClient(PilotGpsClient):
 
     def list_vehicles(self) -> list[dict[str, Any]]:
         payload = self._get_json(self.settings.pilot_gps_base_url.rstrip("/") + "/api/api.php", {"cmd": "list", "node": self.settings.pilot_gps_node})
-        if isinstance(payload, list):
-            return payload
-        return payload.get("list", payload.get("vehicles", []))
+        return extract_vehicle_list(payload)
 
     def list_sensors(self, pilot_agent_id: str) -> list[dict[str, Any]]:
         return []
@@ -183,19 +184,38 @@ class HttpPilotGpsClient(PilotGpsClient):
             self.settings.pilot_gps_base_url.rstrip("/") + "/api/api.php",
             {"cmd": "status", "node": self.settings.pilot_gps_node, "agents": ",".join(agent_ids)},
         )
-        rows = payload.get("data", []) if isinstance(payload, dict) else []
-        return {str(row.get("agentid")): row for row in rows if row.get("agentid") is not None}
+        rows = extract_status_items(payload)
+        status_by_agent: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            agent_id = first_not_empty(row.get("agentid"), row.get("agent_id"), row.get("id"))
+            imei = first_not_empty(row.get("imei"), row.get("uniqid"), row.get("unique_id"))
+            key = str(agent_id or imei or "")
+            if key:
+                status_by_agent[key] = row
+        return status_by_agent
 
-    def _get_json(self, url: str, params: dict[str, Any] | None = None) -> Any:
+    def _get_json(self, url: str, params: dict[str, Any] | None = None, retries: int = 5, sleep_base: float = 1.5) -> Any:
         auth = (
             (self.settings.pilot_gps_username, self.settings.pilot_gps_password)
             if self.settings.pilot_gps_username and self.settings.pilot_gps_password
             else None
         )
-        with httpx.Client(timeout=30, auth=auth) as client:
-            response = client.get(url, params=params)
-            response.raise_for_status()
-            return response.json()
+        last_error: Exception | None = None
+        for attempt in range(retries):
+            try:
+                with httpx.Client(timeout=60, auth=auth, headers={"Accept": "application/json", "User-Agent": "driving-analytics-backend/1.0"}) as client:
+                    response = client.get(url, params=params)
+                    response.raise_for_status()
+                    payload = response.json()
+                    if isinstance(payload, dict) and payload.get("code") not in (None, 0):
+                        raise RuntimeError(f"Pilot-GPS API error code={payload.get('code')}")
+                    return payload
+            except Exception as exc:
+                last_error = exc
+                if attempt == retries - 1:
+                    raise
+                time.sleep(sleep_base * (2**attempt))
+        raise RuntimeError(f"Pilot-GPS request failed: {last_error}")
 
 
 def get_pilot_client(settings: Settings | None = None) -> PilotGpsClient:
