@@ -115,9 +115,15 @@ class MetricCalculator:
     def _counter_delta(rows: list[SensorReading]) -> float:
         if len(rows) < 2:
             return 0.0
-        start = rows[0].value or 0.0
-        end = rows[-1].value or 0.0
-        return max(0.0, end - start)
+        total = 0.0
+        previous = rows[0].value or 0.0
+        for row in rows[1:]:
+            current = row.value or 0.0
+            delta = current - previous
+            if delta > 0:
+                total += delta
+            previous = current
+        return total
 
     @staticmethod
     def _ratio(rows: list[SensorReading]) -> float | None:

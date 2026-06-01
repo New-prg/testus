@@ -64,3 +64,25 @@ def test_metric_calculator_respects_idle_grace_and_high_speed_braking() -> None:
     assert result.idle_ratio == 0.1667
     assert result.brakes_per_100km == 2.5
     assert result.high_speed_brakes_per_100km == 2.5
+
+
+def test_metric_calculator_sums_positive_counter_segments_after_reset() -> None:
+    db = build_session()
+    user = User(email="metrics-reset@example.com", login="metrics-reset@example.com", password_hash="hash", full_name="Metrics Reset", role="admin")
+    db.add(user)
+    db.flush()
+    vehicle = Vehicle(user_id=user.id, name="Reset vehicle")
+    db.add(vehicle)
+    db.flush()
+    distance_sensor = ensure_sensor(db, vehicle, "distance")
+    start = datetime(2026, 1, 1, 8, 0, tzinfo=UTC)
+
+    add_reading(db, vehicle, distance_sensor, start, 100)
+    add_reading(db, vehicle, distance_sensor, start + timedelta(hours=1), 130)
+    add_reading(db, vehicle, distance_sensor, start + timedelta(hours=2), 10)
+    add_reading(db, vehicle, distance_sensor, start + timedelta(hours=3), 40)
+    db.commit()
+
+    result = MetricCalculator().calculate(db, vehicle.id, start, start + timedelta(hours=4))
+
+    assert result.distance_km == 60

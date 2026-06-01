@@ -103,10 +103,22 @@ def normalize_sensor_name(name: str) -> str:
 
 
 def resolve_analytics_key(sensor_name: str) -> str | None:
-    normalized = normalize_sensor_name(sensor_name)
+    return resolve_analytics_key_from_candidates(sensor_name)
+
+
+def resolve_analytics_key_from_candidates(*candidates: object) -> str | None:
+    normalized_candidates = [
+        normalize_sensor_name(str(candidate))
+        for candidate in candidates
+        if isinstance(candidate, str) and candidate.strip()
+    ]
+    for normalized in normalized_candidates:
+        if normalized in ANALYTICS_SENSORS:
+            return normalized
     for key, spec in ANALYTICS_SENSORS.items():
-        candidates = [spec["pilot_name"], *spec.get("aliases", [])]
-        if any(normalize_sensor_name(candidate) == normalized for candidate in candidates):
+        spec_candidates = [spec["pilot_name"], *spec.get("aliases", [])]
+        normalized_spec_candidates = {normalize_sensor_name(candidate) for candidate in spec_candidates}
+        if any(normalized in normalized_spec_candidates for normalized in normalized_candidates):
             return key
     return None
 

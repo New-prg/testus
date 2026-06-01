@@ -60,3 +60,13 @@ def test_null_metrics_do_not_break_rating() -> None:
     assert rating.metric_scores["coasting"] is None
     assert 1.0 <= rating.final_rating <= 10.0
     assert rating.warnings
+
+
+def test_missing_metrics_renormalize_weights_to_one() -> None:
+    rating = RatingCalculator().calculate(build_metric(cruise_control_ratio=None, coasting_ratio=None), CAR_TYPE_NOT_KAMAZ)
+    assert round(sum(rating.renormalized_weights.values()), 6) == 1.0
+
+
+def test_explanations_are_score_based_not_metric_direction_based() -> None:
+    rating = RatingCalculator().calculate(build_metric(fuel_per_100km=5.0, coasting_ratio=0.10), CAR_TYPE_NOT_KAMAZ)
+    assert any("score" in item for item in rating.positive_factors + rating.negative_factors)
