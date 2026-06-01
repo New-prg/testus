@@ -62,17 +62,6 @@ export type VehicleComparisonRow = {
   analytics_readiness_percent: number;
 };
 
-export type ProblemVehicle = VehicleComparisonRow & {
-  anomaly_flag: boolean;
-  anomaly_reasons: string[];
-  last_sync_at: string | null;
-};
-
-export type ProblemVehiclesResponse = {
-  worst: ProblemVehicle[];
-  best: ProblemVehicle[];
-};
-
 function periodParams(period: DashboardPeriod): string {
   return new URLSearchParams({ period }).toString();
 }
@@ -87,8 +76,4 @@ export function getDashboardTimeseries(period: DashboardPeriod = 'week'): Promis
 
 export function getVehicleComparison(period: DashboardPeriod = 'week'): Promise<VehicleComparisonRow[]> {
   return apiFetch<VehicleComparisonRow[]>(`/dashboard/comparison?${periodParams(period)}`);
-}
-
-export function getProblemVehicles(period: DashboardPeriod = 'week'): Promise<ProblemVehiclesResponse> {
-  return apiFetch<ProblemVehiclesResponse>(`/dashboard/problem-vehicles?${periodParams(period)}`);
 }
