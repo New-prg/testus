@@ -23,6 +23,7 @@ services:
     environment:
       DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_long.csv
       DEMO_SENSOR_PROFILE_PATH: /demo-dataset/sensor_profile_canonical.json
+      DEMO_DATASET_ROW_LIMIT: "-1"
     volumes:
       - ../../dataset/pilot_sensor_dataset_2026-05-31_reduction:/demo-dataset:ro
     depends_on:
@@ -31,6 +32,23 @@ services:
     restart: on-failure
     ports:
       - "8000:8000"
+
+  sync-worker:
+    build:
+      context: ./backend
+    env_file:
+      - .env
+    environment:
+      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_long.csv
+      DEMO_SENSOR_PROFILE_PATH: /demo-dataset/sensor_profile_canonical.json
+      DEMO_DATASET_ROW_LIMIT: "-1"
+    volumes:
+      - ../../dataset/pilot_sensor_dataset_2026-05-31_reduction:/demo-dataset:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+    command: python -u -m app.cli sync-worker
 
   frontend:
     build:
