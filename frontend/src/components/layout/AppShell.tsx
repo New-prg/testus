@@ -29,7 +29,7 @@ export function AppShell() {
             </div>
             <div>
               <p className="section-label">Аналитика автопарка</p>
-              <h1 className="font-display text-xl text-cream">Центр эффективности вождения</h1>
+              <h1 className="font-display text-xl text-cream">Эффективность вождения</h1>
             </div>
           </div>
 

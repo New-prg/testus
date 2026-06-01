@@ -87,9 +87,9 @@ export function VehiclesTable({ vehicles, sortKey, sortDirection, onSort }: Vehi
               <th><SortableHeader label="Топливо" sortKey="fuel_per_100km" activeSortKey={sortKey} sortDirection={sortDirection} onSort={onSort} /></th>
               <th><SortableHeader label="Простой" sortKey="idle_ratio" activeSortKey={sortKey} sortDirection={sortDirection} onSort={onSort} /></th>
               <th><SortableHeader label="Накат" sortKey="coasting_ratio" activeSortKey={sortKey} sortDirection={sortDirection} onSort={onSort} /></th>
-              <th><SortableHeader label="Оптимальный RPM" sortKey="optimal_rpm_ratio" activeSortKey={sortKey} sortDirection={sortDirection} onSort={onSort} /></th>
+              <th><SortableHeader label="Оптимальные обороты" sortKey="optimal_rpm_ratio" activeSortKey={sortKey} sortDirection={sortDirection} onSort={onSort} /></th>
               <th><SortableHeader label="Торможения" sortKey="brakes_per_100km" activeSortKey={sortKey} sortDirection={sortDirection} onSort={onSort} /></th>
-              <th><SortableHeader label="Предугадывание" sortKey="high_speed_brakes_per_100km" activeSortKey={sortKey} sortDirection={sortDirection} onSort={onSort} /></th>
+              <th><SortableHeader label="Резкие торможения" sortKey="high_speed_brakes_per_100km" activeSortKey={sortKey} sortDirection={sortDirection} onSort={onSort} /></th>
               <th><SortableHeader label="Круиз" sortKey="cruise_control_ratio" activeSortKey={sortKey} sortDirection={sortDirection} onSort={onSort} /></th>
               <th><SortableHeader label="Превышение" sortKey="overspeed_ratio" activeSortKey={sortKey} sortDirection={sortDirection} onSort={onSort} /></th>
               <th><SortableHeader label="Готовность" sortKey="analytics_readiness_percent" activeSortKey={sortKey} sortDirection={sortDirection} onSort={onSort} /></th>
