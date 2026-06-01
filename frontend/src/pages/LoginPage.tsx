@@ -12,7 +12,7 @@ type SubmitEvent = {
 export function LoginPage() {
   const { login, isAuthenticated } = useAuth();
   const location = useLocation();
-  const [email, setEmail] = useState('admin@example.com');
+  const [loginValue, setLoginValue] = useState('admin@example.com');
   const [password, setPassword] = useState('admin123');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -23,7 +23,7 @@ export function LoginPage() {
     setError(null);
     setIsSubmitting(true);
     try {
-      await login({ email, password });
+      await login({ login: loginValue, password });
     } catch (caughtError) {
       setError(caughtError instanceof ApiError ? caughtError.message : 'Не удалось войти. Проверьте доступность API.');
     } finally {
@@ -62,10 +62,10 @@ export function LoginPage() {
 
           {error ? <div className="mt-5"><ErrorState title="Не удалось войти" message={error} /></div> : null}
 
-          <label className="mt-6 block text-sm font-semibold text-cream" htmlFor="email">
-            Электронная почта
+          <label className="mt-6 block text-sm font-semibold text-cream" htmlFor="login">
+            Логин Pilot-GPS
           </label>
-          <input id="email" className="control-field mt-2" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+          <input id="login" className="control-field mt-2" value={loginValue} onChange={(event) => setLoginValue(event.target.value)} required />
 
           <label className="mt-5 block text-sm font-semibold text-cream" htmlFor="password">
             Пароль

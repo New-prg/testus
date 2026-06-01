@@ -2,19 +2,29 @@ import { apiFetch, clearToken, setToken } from './client';
 
 export type User = {
   id: string;
-  email: string;
+  login: string;
   full_name: string | null;
+  role: string;
   is_admin: boolean;
   is_active: boolean;
+  pilot_server_address: string | null;
+  pilot_node: number | null;
+  is_demo: boolean;
+  sync_started_at: string | null;
+  last_sync_completed_at: string | null;
+  next_sync_at: string | null;
+  last_sync_error: string | null;
 };
 
 export type LoginPayload = {
-  email: string;
+  login: string;
   password: string;
 };
 
 export type RegisterPayload = LoginPayload & {
   full_name?: string;
+  server_address: string;
+  node: number;
 };
 
 type TokenResponse = {

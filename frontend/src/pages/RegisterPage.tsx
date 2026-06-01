@@ -12,8 +12,10 @@ type SubmitEvent = {
 export function RegisterPage() {
   const { register, isAuthenticated } = useAuth();
   const [fullName, setFullName] = useState('Fleet Analyst');
-  const [email, setEmail] = useState('analyst@example.com');
+  const [loginValue, setLoginValue] = useState('pilot-demo-user');
   const [password, setPassword] = useState('analyst123');
+  const [serverAddress, setServerAddress] = useState('https://pilot-gps.example');
+  const [node, setNode] = useState('1');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -22,7 +24,13 @@ export function RegisterPage() {
     setError(null);
     setIsSubmitting(true);
     try {
-      await register({ full_name: fullName, email, password });
+      await register({
+        full_name: fullName,
+        login: loginValue,
+        password,
+        server_address: serverAddress,
+        node: Number(node),
+      });
     } catch (caughtError) {
       setError(caughtError instanceof ApiError ? caughtError.message : 'Не удалось создать учётную запись.');
     } finally {
@@ -48,10 +56,20 @@ export function RegisterPage() {
         </label>
         <input id="fullName" className="control-field mt-2" value={fullName} onChange={(event) => setFullName(event.target.value)} />
 
-        <label className="mt-5 block text-sm font-semibold text-cream" htmlFor="registerEmail">
-          Электронная почта
+        <label className="mt-5 block text-sm font-semibold text-cream" htmlFor="registerLogin">
+          Логин Pilot-GPS
         </label>
-        <input id="registerEmail" className="control-field mt-2" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+        <input id="registerLogin" className="control-field mt-2" value={loginValue} onChange={(event) => setLoginValue(event.target.value)} required />
+
+        <label className="mt-5 block text-sm font-semibold text-cream" htmlFor="serverAddress">
+          Адрес сервера Pilot-GPS
+        </label>
+        <input id="serverAddress" className="control-field mt-2" value={serverAddress} onChange={(event) => setServerAddress(event.target.value)} required />
+
+        <label className="mt-5 block text-sm font-semibold text-cream" htmlFor="pilotNode">
+          Нода
+        </label>
+        <input id="pilotNode" className="control-field mt-2" type="number" min={1} value={node} onChange={(event) => setNode(event.target.value)} required />
 
         <label className="mt-5 block text-sm font-semibold text-cream" htmlFor="registerPassword">
           Пароль
