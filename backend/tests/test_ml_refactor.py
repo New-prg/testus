@@ -408,19 +408,354 @@ def test_dataset_importer_accepts_reduced_telematics_schema() -> None:
     assert reading.speed == 45.0
 
 
+def test_dataset_importer_expands_wide_telematics_schema() -> None:
+    db = build_session()
+    importer = DatasetImporter()
+    owner = make_user("dataset-wide@example.com")
+    db.add(owner)
+    db.commit()
+
+    result = importer.import_provider(
+        db,
+        _InMemoryDatasetProvider(
+            [
+                {
+                    "vehicle_key": "10039",
+                    "vehicle_agentid": "10039",
+                    "imei": "862059069276700",
+                    "vehiclenumber": "29-П Р762СР716",
+                    "vin": "XTC549015R2601687",
+                    "timestamp": "2026-05-24T03:11:20+00:00",
+                    "datetime_utc": "2026-05-24T03:11:20+00:00",
+                    "speed_from_point": 45.0,
+                    "fuel_consumption": 20.0,
+                    "distance": 100.0,
+                    "engine_work_time": 120.0,
+                    "idle_time": 15.0,
+                    "brake_pedal": 0.0,
+                    "overspeed": 0.0,
+                    "coasting": 0.32,
+                    "optimal_rpm": 0.61,
+                    "cruise_control": 0.28,
+                },
+                {
+                    "vehicle_key": "10039",
+                    "vehicle_agentid": "10039",
+                    "imei": "862059069276700",
+                    "vehiclenumber": "29-П Р762СР716",
+                    "vin": "XTC549015R2601687",
+                    "timestamp": "2026-05-24T03:21:20+00:00",
+                    "datetime_utc": "2026-05-24T03:21:20+00:00",
+                    "speed_from_point": 55.0,
+                    "fuel_consumption": 23.0,
+                    "distance": 109.2,
+                    "engine_work_time": 180.0,
+                    "idle_time": 20.0,
+                    "brake_pedal": 1.0,
+                    "overspeed": 0.18,
+                    "coasting": 0.34,
+                    "optimal_rpm": 0.64,
+                    "cruise_control": 0.35,
+                },
+            ]
+        ),
+        owner,
+    )
+
+    vehicle = db.query(Vehicle).one()
+    sensors = {sensor.pilot_sensor_id: sensor for sensor in vehicle.sensors}
+    analytics_links = {link.analytics_key for link in db.query(AnalyticsSensorLink).all()}
+    brake_sensor = sensors["wide:brake_pedal"]
+    brake_readings = [reading for reading in vehicle.readings if reading.sensor_id == brake_sensor.id]
+    speed_sensor = sensors["wide:speed"]
+    speed_readings = [reading for reading in vehicle.readings if reading.sensor_id == speed_sensor.id]
+    distance_sensor = sensors["wide:distance"]
+    distance_readings = [reading for reading in vehicle.readings if reading.sensor_id == distance_sensor.id]
+    overspeed_sensor = sensors["wide:overspeed"]
+    overspeed_readings = [reading for reading in vehicle.readings if reading.sensor_id == overspeed_sensor.id]
+    metric_window = db.query(VehicleMetricWindow).one()
+
+    assert result.vehicles == 1
+    assert result.readings == 20
+    assert result.metric_windows == 1
+    assert set(sensors) == {
+        "wide:speed",
+        "wide:fuel_consumption",
+        "wide:distance",
+        "wide:engine_work_time",
+        "wide:idle_time",
+        "wide:brake_pedal",
+        "wide:overspeed",
+        "wide:coasting",
+        "wide:optimal_rpm",
+        "wide:cruise_control",
+    }
+    assert analytics_links == {
+        "speed",
+        "fuel_consumption",
+        "distance",
+        "engine_work_time",
+        "idle_time",
+        "brake_pedal",
+        "overspeed",
+        "coasting",
+        "optimal_rpm",
+        "cruise_control",
+    }
+    assert [reading.value for reading in speed_readings] == [45.0, 55.0]
+    assert all(reading.speed == reading.value for reading in speed_readings)
+    assert [reading.speed for reading in brake_readings] == [45.0, 55.0]
+    assert distance_readings[1].value > distance_readings[0].value
+    assert [reading.value for reading in overspeed_readings] == [0.0, 0.18]
+    assert metric_window.distance_km > 0.0
+    assert metric_window.fuel_per_100km is not None
+    assert metric_window.brakes_per_100km is not None
+    assert metric_window.idle_ratio is not None
+    assert metric_window.coasting_ratio is not None
+    assert metric_window.optimal_rpm_ratio is not None
+    assert metric_window.cruise_control_ratio is not None
+    assert 0.0 <= (metric_window.overspeed_ratio or 0.0) <= 1.0
+
+
+def test_dataset_importer_wide_telematics_is_deterministic() -> None:
+    rows = [
+        {
+            "vehicle_key": "10039",
+            "vehicle_agentid": "10039",
+            "imei": "862059069276700",
+            "vehiclenumber": "29-П Р762СР716",
+            "vin": "XTC549015R2601687",
+            "timestamp": "2026-05-24T03:11:20+00:00",
+            "datetime_utc": "2026-05-24T03:11:20+00:00",
+            "speed_from_point": 45.0,
+            "fuel_consumption": 20.0,
+            "distance": 100.0,
+            "engine_work_time": 120.0,
+            "idle_time": 15.0,
+            "brake_pedal": 0.0,
+            "overspeed": 0.0,
+            "coasting": 0.32,
+            "optimal_rpm": 0.61,
+            "cruise_control": 0.28,
+        },
+        {
+            "vehicle_key": "10039",
+            "vehicle_agentid": "10039",
+            "imei": "862059069276700",
+            "vehiclenumber": "29-П Р762СР716",
+            "vin": "XTC549015R2601687",
+            "timestamp": "2026-05-24T03:21:20+00:00",
+            "datetime_utc": "2026-05-24T03:21:20+00:00",
+            "speed_from_point": 55.0,
+            "fuel_consumption": 23.0,
+            "distance": 109.2,
+            "engine_work_time": 180.0,
+            "idle_time": 20.0,
+            "brake_pedal": 1.0,
+            "overspeed": 0.18,
+            "coasting": 0.34,
+            "optimal_rpm": 0.64,
+            "cruise_control": 0.35,
+        },
+    ]
+
+    def import_signature() -> list[tuple[str, str, float | None, float | None]]:
+        db = build_session()
+        importer = DatasetImporter()
+        owner = make_user("dataset-wide-deterministic@example.com")
+        db.add(owner)
+        db.commit()
+        importer.import_provider(db, _InMemoryDatasetProvider(rows), owner)
+        vehicle = db.query(Vehicle).one()
+        sensor_keys = {sensor.id: sensor.pilot_sensor_id for sensor in vehicle.sensors}
+        return sorted(
+            [
+                (sensor_keys[reading.sensor_id], reading.timestamp.isoformat(), reading.value, reading.speed)
+                for reading in vehicle.readings
+            ]
+        )
+
+    assert import_signature() == import_signature()
+
+
+def test_dataset_importer_wide_telematics_imports_static_enriched_values() -> None:
+    db = build_session()
+    importer = DatasetImporter()
+    owner = make_user("dataset-wide-safe@example.com")
+    db.add(owner)
+    db.commit()
+
+    importer.import_provider(
+        db,
+        _InMemoryDatasetProvider(
+            [
+                {
+                    "vehicle_key": "10039",
+                    "vehicle_agentid": "10039",
+                    "imei": "862059069276700",
+                    "vehiclenumber": "29-П Р762СР716",
+                    "vin": "XTC549015R2601687",
+                    "timestamp": "2026-05-24T03:11:20+00:00",
+                    "datetime_utc": "2026-05-24T03:11:20+00:00",
+                    "speed_from_point": 88.0,
+                    "fuel_consumption": 11.4,
+                    "distance": 102.0,
+                    "engine_work_time": 180.0,
+                    "idle_time": 12.0,
+                    "brake_pedal": 0.0,
+                    "overspeed": 0.61,
+                    "coasting": 0.22,
+                    "optimal_rpm": 0.58,
+                    "cruise_control": 0.46,
+                },
+                {
+                    "vehicle_key": "10039",
+                    "vehicle_agentid": "10039",
+                    "imei": "862059069276700",
+                    "vehiclenumber": "29-П Р762СР716",
+                    "vin": "XTC549015R2601687",
+                    "timestamp": "2026-05-24T03:21:20+00:00",
+                    "datetime_utc": "2026-05-24T03:21:20+00:00",
+                    "speed_from_point": 52.0,
+                    "fuel_consumption": 13.0,
+                    "distance": 111.5,
+                    "engine_work_time": 240.0,
+                    "idle_time": 24.0,
+                    "brake_pedal": 1.0,
+                    "overspeed": 0.12,
+                    "coasting": 0.31,
+                    "optimal_rpm": 0.66,
+                    "cruise_control": 0.29,
+                },
+            ]
+        ),
+        owner,
+    )
+
+    vehicle = db.query(Vehicle).one()
+    sensors = {sensor.pilot_sensor_id: sensor for sensor in vehicle.sensors}
+    brake_readings = [reading for reading in vehicle.readings if reading.sensor_id == sensors["wide:brake_pedal"].id]
+    overspeed_readings = [reading for reading in vehicle.readings if reading.sensor_id == sensors["wide:overspeed"].id]
+
+    assert [reading.value for reading in brake_readings] == [0.0, 1.0]
+    assert [reading.value for reading in overspeed_readings] == [0.61, 0.12]
+
+
+def test_dataset_importer_skips_invalid_rows_and_creates_metric_and_rating_windows() -> None:
+    db = build_session()
+    importer = DatasetImporter()
+    owner = make_user("dataset-windows@example.com")
+    db.add(owner)
+    db.commit()
+
+    result = importer.import_provider(
+        db,
+        _InMemoryDatasetProvider(
+            [
+                {
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "value": 100.0,
+                    "sensor_name": "Полный пробег (CAN)",
+                    "sensor_id": "distance-1",
+                    "analytics_key": "distance",
+                    "vehicle_id": "veh-1",
+                    "name": "Vehicle 1",
+                },
+                {
+                    "timestamp": "2026-01-01T02:00:00Z",
+                    "value": 130.0,
+                    "sensor_name": "Полный пробег (CAN)",
+                    "sensor_id": "distance-1",
+                    "analytics_key": "distance",
+                    "vehicle_id": "veh-1",
+                    "name": "Vehicle 1",
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "value": 20.0,
+                    "sensor_name": "Полный расход топлива (CAN)",
+                    "sensor_id": "fuel-1",
+                    "analytics_key": "fuel_consumption",
+                    "vehicle_id": "veh-1",
+                    "name": "Vehicle 1",
+                },
+                {
+                    "timestamp": "2026-01-01T02:00:00Z",
+                    "value": 26.0,
+                    "sensor_name": "Полный расход топлива (CAN)",
+                    "sensor_id": "fuel-1",
+                    "analytics_key": "fuel_consumption",
+                    "vehicle_id": "veh-1",
+                    "name": "Vehicle 1",
+                },
+                {
+                    "timestamp": "",
+                    "value": 1.0,
+                    "sensor_name": "Полный пробег (CAN)",
+                    "sensor_id": "distance-1",
+                    "analytics_key": "distance",
+                    "vehicle_id": "veh-1",
+                    "name": "Vehicle 1",
+                },
+            ]
+        ),
+        owner,
+    )
+
+    metric_windows = db.query(VehicleMetricWindow).all()
+    rating_windows = db.query(VehicleRatingWindow).all()
+
+    assert result.readings == 4
+    assert result.skipped_rows == 1
+    assert result.metric_windows == 1
+    assert len(metric_windows) == 1
+    assert len(rating_windows) == 1
+    assert rating_windows[0].metric_window_id == metric_windows[0].id
+
+
+def test_dataset_importer_keeps_unmapped_sensor_without_analytics_link() -> None:
+    db = build_session()
+    importer = DatasetImporter()
+    owner = make_user("dataset-unmapped@example.com")
+    db.add(owner)
+    db.commit()
+
+    result = importer.import_provider(
+        db,
+        _InMemoryDatasetProvider(
+            [
+                {
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "value": 42.0,
+                    "sensor_name": "Неизвестный сенсор",
+                    "sensor_id": "unknown-1",
+                    "vehicle_id": "veh-1",
+                    "name": "Vehicle 1",
+                }
+            ]
+        ),
+        owner,
+    )
+
+    sensor = db.query(VehicleSensor).one()
+
+    assert result.readings == 1
+    assert db.query(AnalyticsSensorLink).count() == 0
+    assert sensor.sensor_type == "dataset_sensor"
+
+
 def test_seed_demo_data_prefers_configured_dataset(monkeypatch, tmp_path: Path) -> None:
     db = build_session()
     dataset_path = tmp_path / "demo.csv"
     dataset_path.write_text(
-        "vehicle_key,vehicle_agentid,imei,vehiclenumber,vin,timestamp,canonical_feature,value,local_sensor_id,sensor_name,speed_from_point\n"
-        "10039,10039,862059069276700,29-П Р762СР716,XTC549015R2601687,2026-05-24T03:11:20+00:00,speed,45.0,72427,Скорость (тахограф),45.0\n",
+        "vehicle_key,vehicle_agentid,imei,vehiclenumber,vin,timestamp,datetime_utc,speed_from_point,fuel_consumption,distance,engine_work_time,idle_time,brake_pedal,overspeed,coasting,optimal_rpm,cruise_control\n"
+        "10039,10039,862059069276700,29-П Р762СР716,XTC549015R2601687,1780012811,2026-05-24T03:11:20+00:00,45.0,20.0,100.0,120.0,15.0,0.0,0.0,0.32,0.61,0.28\n"
+        "10039,10039,862059069276700,29-П Р762СР716,XTC549015R2601687,1780013411,2026-05-24T03:21:20+00:00,55.0,23.0,109.2,180.0,20.0,1.0,0.18,0.34,0.64,0.35\n",
         encoding="utf-8",
     )
-    sensor_profile_path = tmp_path / "sensor_profile_canonical.json"
-    sensor_profile_path.write_text("[]", encoding="utf-8")
 
     monkeypatch.setenv("DEMO_DATASET_PATH", str(dataset_path))
-    monkeypatch.setenv("DEMO_SENSOR_PROFILE_PATH", str(sensor_profile_path))
+    monkeypatch.delenv("DEMO_SENSOR_PROFILE_PATH", raising=False)
     monkeypatch.setenv("DEMO_DATASET_ROW_LIMIT", "10")
     get_settings.cache_clear()
 
@@ -431,9 +766,10 @@ def test_seed_demo_data_prefers_configured_dataset(monkeypatch, tmp_path: Path) 
 
     assert result["source"] == "local_dataset"
     assert result["dataset_path"] == str(dataset_path)
-    assert result["sensor_profile_path"] == str(sensor_profile_path)
+    assert result["sensor_profile_path"] is None
     assert result["dataset_row_limit"] == 10
     assert result["vehicles"] == 1
+    assert result["readings"] == 20
     assert db.query(User).filter(User.email == "admin@example.com").one()
 
 
@@ -498,8 +834,9 @@ def test_seed_demo_data_resets_existing_demo_statistics_for_dataset(monkeypatch,
 
     dataset_path = tmp_path / "demo.csv"
     dataset_path.write_text(
-        "vehicle_key,vehicle_agentid,imei,vehiclenumber,vin,timestamp,canonical_feature,value,local_sensor_id,sensor_name,speed_from_point\n"
-        "10040,10040,862059069276701,30-П Р762СР717,XTC549015R2601688,2026-05-24T03:11:20+00:00,speed,25.0,72428,Скорость (тахограф),25.0\n",
+        "vehicle_key,vehicle_agentid,imei,vehiclenumber,vin,timestamp,datetime_utc,speed_from_point,fuel_consumption,distance,engine_work_time,idle_time,brake_pedal,overspeed,coasting,optimal_rpm,cruise_control\n"
+        "10040,10040,862059069276701,30-П Р762СР717,XTC549015R2601688,1780012811,2026-05-24T03:11:20+00:00,25.0,10.0,95.0,120.0,10.0,0.0,0.04,0.29,0.55,0.11\n"
+        "10040,10040,862059069276701,30-П Р762СР717,XTC549015R2601688,1780013411,2026-05-24T03:21:20+00:00,35.0,12.0,104.0,180.0,12.0,0.0,0.05,0.31,0.62,0.14\n",
         encoding="utf-8",
     )
 
@@ -518,7 +855,7 @@ def test_seed_demo_data_resets_existing_demo_statistics_for_dataset(monkeypatch,
     assert db.query(MLModelRun).count() == 0
 
 
-def test_seed_demo_data_falls_back_when_configured_dataset_is_missing(monkeypatch, tmp_path: Path) -> None:
+def test_seed_demo_data_fails_when_configured_dataset_is_missing(monkeypatch, tmp_path: Path) -> None:
     db = build_session()
     missing_dataset_path = tmp_path / "missing-demo.csv"
 
@@ -526,13 +863,10 @@ def test_seed_demo_data_falls_back_when_configured_dataset_is_missing(monkeypatc
     get_settings.cache_clear()
 
     try:
-        result = seed_demo_data(db)
+        with pytest.raises(ValueError, match="Demo dataset file does not exist"):
+            seed_demo_data(db)
     finally:
         get_settings.cache_clear()
-
-    assert result["source"] == "demo_pilot_provider"
-    assert result["vehicles"]["synced"] == 12
-    assert result["readings"]["inserted"] > 0
 
 
 def test_demo_dataset_row_limit_defaults_to_unlimited(monkeypatch) -> None:

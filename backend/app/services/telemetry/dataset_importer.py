@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import insert, select
 from sqlalchemy.orm import Session
 
-from app.config.analytics_sensors import ANALYTICS_SENSORS, resolve_analytics_key
+from app.config.analytics_sensors import ANALYTICS_SENSORS, resolve_analytics_key_from_candidates
 from app.config.rating_profile import CAR_TYPE_UNKNOWN
 from app.db.models import AnalyticsSensorLink, SensorReading, User, Vehicle, VehicleSensor, new_uuid
 from app.services.telemetry.provider import TelemetryProvider
@@ -22,6 +22,18 @@ from app.services.ratings.rating_calculator import RatingCalculator
 MAX_DATASET_SIZE_BYTES = 25 * 1024 * 1024
 MAX_IMPORT_ROWS = 200_000
 MAX_IMPORT_RANGE_DAYS = 366
+WIDE_DATASET_SENSOR_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("speed", "speed_from_point"),
+    ("fuel_consumption", "fuel_consumption"),
+    ("distance", "distance"),
+    ("engine_work_time", "engine_work_time"),
+    ("idle_time", "idle_time"),
+    ("brake_pedal", "brake_pedal"),
+    ("overspeed", "overspeed"),
+    ("coasting", "coasting"),
+    ("optimal_rpm", "optimal_rpm"),
+    ("cruise_control", "cruise_control"),
+)
 
 
 @dataclass(frozen=True)
@@ -216,7 +228,36 @@ class DatasetImporter:
                     continue
                 expanded.append({**vehicle, **point, "sensor": sensor, "vehicle": vehicle})
             return expanded
+        if self._looks_like_wide_telematics_row(row):
+            return self._expand_wide_telematics_row(row)
         return [row]
+
+    def _expand_wide_telematics_row(self, row: dict[str, Any]) -> list[dict[str, Any]]:
+        expanded_wide_rows: list[dict[str, Any]] = []
+        for analytics_key, source_column in WIDE_DATASET_SENSOR_COLUMNS:
+            value = row.get(source_column)
+            if value in (None, ""):
+                continue
+            expanded_wide_rows.append(
+                {
+                    **row,
+                    "analytics_key": analytics_key,
+                    "canonical_feature": analytics_key,
+                    "local_sensor_id": f"wide:{analytics_key}",
+                    "sensor_name": ANALYTICS_SENSORS[analytics_key]["pilot_name"],
+                    "unit": ANALYTICS_SENSORS[analytics_key]["unit"],
+                    "value": value,
+                }
+            )
+        return expanded_wide_rows
+
+    @staticmethod
+    def _looks_like_wide_telematics_row(row: dict[str, Any]) -> bool:
+        if first_not_empty(row.get("value"), row.get("hum_value"), row.get("dig_value"), row.get("raw_value"), row.get("last_raw_value")) not in (None, ""):
+            return False
+        if first_not_empty(row.get("analytics_key"), row.get("canonical_feature"), row.get("sensor_id"), row.get("local_sensor_id"), row.get("sensor_name"), row.get("name"), row.get("fieldname")) not in (None, ""):
+            return False
+        return any(row.get(source_column) not in (None, "") for _, source_column in WIDE_DATASET_SENSOR_COLUMNS)
 
     def _normalize_row(self, row: dict[str, Any]) -> dict[str, Any] | None:
         raw_vehicle = row.get("vehicle")
@@ -228,8 +269,15 @@ class DatasetImporter:
         if timestamp is None or value is None:
             return None
         sensor_name = str(first_not_empty(sensor_payload.get("name"), row.get("sensor_name"), row.get("name"), row.get("fieldname"), "") or "")
-        analytics_key = first_not_empty(row.get("analytics_key"), row.get("canonical_feature"), sensor_payload.get("analytics_key"), row.get("sensor_key"), row.get("fieldname"))
-        analytics_key = str(analytics_key) if analytics_key in ANALYTICS_SENSORS else resolve_analytics_key(sensor_name)
+        analytics_key = resolve_analytics_key_from_candidates(
+            row.get("analytics_key"),
+            row.get("canonical_feature"),
+            sensor_payload.get("analytics_key"),
+            row.get("sensor_key"),
+            row.get("fieldname"),
+            sensor_payload.get("fieldname"),
+            sensor_name,
+        )
         sensor_id = first_not_empty(sensor_payload.get("id"), sensor_payload.get("sensor_id"), sensor_payload.get("tag_id"), row.get("sensor_id"), row.get("local_sensor_id"))
         return {
             "pilot_agent_id": str(first_not_empty(vehicle_payload.get("pilot_agent_id"), vehicle_payload.get("vehicle_agentid"), vehicle_payload.get("agentid"), vehicle_payload.get("agent_id"), vehicle_payload.get("vehicle_id"), vehicle_payload.get("vehicle_key"), vehicle_payload.get("imei"), vehicle_payload.get("plate_number"), vehicle_payload.get("vehiclenumber"), "local-dataset")),
