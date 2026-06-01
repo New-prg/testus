@@ -1,9 +1,8 @@
 import { useEffect } from 'react';
 
-import type { DashboardMetricScores, DashboardPeriod, ProblemVehicle } from '../api/dashboard';
+import type { DashboardMetricScores, DashboardPeriod } from '../api/dashboard';
 import { KpiCard } from '../components/cards/KpiCard';
 import { EmptyState, ErrorState, LoadingState } from '../components/cards/StateViews';
-import { ComparisonBarChart } from '../components/charts/ComparisonBarChart';
 import { EfficiencyTrendChart } from '../components/charts/EfficiencyTrendChart';
 import { ComparisonTable } from '../components/tables/ComparisonTable';
 import { useRouteData } from '../components/layout/RouteDataProvider';
@@ -28,46 +27,6 @@ function metricScore(summary: { metric_scores?: DashboardMetricScores }, key: ke
 
 function metricDelta(summary: { metric_score_changes?: DashboardMetricScores }, key: keyof DashboardMetricScores): number {
   return summary.metric_score_changes?.[key] ?? 0;
-}
-
-function ProblemVehicleCard({ vehicle, label }: { vehicle: ProblemVehicle; label: 'Best' | 'Worst' }) {
-  const isWorst = label === 'Worst';
-  const localizedLabel = isWorst ? 'Проблемная' : 'Лучшая';
-  return (
-    <article className={`rounded-3xl border p-4 ${isWorst ? 'border-danger/35 bg-danger/10' : 'border-success/35 bg-success/10'}`}>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-widest text-muted">{localizedLabel} машина</p>
-          <h3 className="mt-2 text-lg font-bold text-cream">{vehicle.plate_number}</h3>
-          <p className="text-sm text-muted">{vehicle.name} · {vehicle.vehicle_type}</p>
-        </div>
-        <span className={`rounded-pill px-3 py-1 text-xs font-bold ${vehicle.anomaly_flag ? 'bg-danger text-cream' : 'bg-success text-ink'}`}>
-          {vehicle.anomaly_flag ? 'Аномалия' : 'Стабильно'}
-        </span>
-      </div>
-      <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
-        <div>
-          <p className="text-muted">Рейтинг</p>
-          <p className="font-bold text-signal">{vehicle.rating.toFixed(1)}</p>
-        </div>
-        <div>
-          <p className="text-muted">Топливо</p>
-          <p className="font-bold text-brass">{vehicle.fuel_per_100km.toFixed(1)} L</p>
-        </div>
-        <div>
-          <p className="text-muted">Простой</p>
-          <p className="font-bold text-cream">{percent(vehicle.idle_ratio)}</p>
-        </div>
-      </div>
-      {vehicle.anomaly_reasons.length ? (
-        <ul className="mt-4 space-y-2 text-sm text-cream/80">
-          {vehicle.anomaly_reasons.slice(0, 3).map((reason) => (
-            <li key={reason}>• {reason}</li>
-          ))}
-        </ul>
-      ) : null}
-    </article>
-  );
 }
 
 export function DashboardPage() {
@@ -97,8 +56,6 @@ export function DashboardPage() {
     );
   }
 
-  const bestVehicles = data.problemVehicles.best.slice(0, 2);
-  const worstVehicles = data.problemVehicles.worst.slice(0, 2);
   const kpiCards: Array<{ label: string; score: string; actualValue: string; delta: number; tone: 'signal' | 'brass' | 'success' | 'warning' | 'danger' }> = [
     {
       label: 'Рейтинг автопарка',
@@ -169,18 +126,6 @@ export function DashboardPage() {
       </section>
 
       <EfficiencyTrendChart points={data.timeseries} />
-
-      <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-        <ComparisonBarChart rows={data.comparison} />
-        <div className="surface-card p-5">
-          <p className="section-label">Лучшие и проблемные машины</p>
-          <h2 className="mt-2 font-display text-2xl text-cream">Главное внимание</h2>
-          <div className="mt-5 grid gap-4 lg:grid-cols-2">
-            {bestVehicles.map((vehicle) => <ProblemVehicleCard key={`best-${vehicle.vehicle_id}`} vehicle={vehicle} label="Best" />)}
-            {worstVehicles.map((vehicle) => <ProblemVehicleCard key={`worst-${vehicle.vehicle_id}`} vehicle={vehicle} label="Worst" />)}
-          </div>
-        </div>
-      </section>
 
       <ComparisonTable rows={data.comparison} />
     </div>

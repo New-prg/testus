@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 
-import type { DashboardPeriod, DashboardSummary, DashboardTimeseriesPoint, ProblemVehiclesResponse, VehicleComparisonRow } from '../../api/dashboard';
-import { getDashboardSummary, getDashboardTimeseries, getProblemVehicles, getVehicleComparison } from '../../api/dashboard';
+import type { DashboardPeriod, DashboardSummary, DashboardTimeseriesPoint, VehicleComparisonRow } from '../../api/dashboard';
+import { getDashboardSummary, getDashboardTimeseries, getVehicleComparison } from '../../api/dashboard';
 import type { FleetReport, ReportObjectType, VehicleReport } from '../../api/reports';
 import { getFleetReport, getVehicleReport } from '../../api/reports';
 import type { Vehicle } from '../../api/vehicles';
@@ -11,7 +11,6 @@ type DashboardData = {
   summary: DashboardSummary;
   timeseries: DashboardTimeseriesPoint[];
   comparison: VehicleComparisonRow[];
-  problemVehicles: ProblemVehiclesResponse;
 };
 
 type ActiveReport = FleetReport | VehicleReport;
@@ -95,9 +94,8 @@ export function RouteDataProvider({ children }: { children: React.ReactNode }) {
       getDashboardSummary(period),
       getDashboardTimeseries(period),
       getVehicleComparison(period),
-      getProblemVehicles(period),
     ])
-      .then(([summary, timeseries, comparison, problemVehicles]) => {
+      .then(([summary, timeseries, comparison]) => {
         if (!timeseries.length && !comparison.length && (summary.vehicles_count ?? 0) === 0) {
           setDashboardCache((current) => ({
             ...current,
@@ -105,7 +103,7 @@ export function RouteDataProvider({ children }: { children: React.ReactNode }) {
           }));
           return null;
         }
-        const data = { summary, timeseries, comparison, problemVehicles };
+        const data = { summary, timeseries, comparison };
         setDashboardCache((current) => ({
           ...current,
           [period]: { data, error: null, isLoading: false, loadedAt: Date.now() },
