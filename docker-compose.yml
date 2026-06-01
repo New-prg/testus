@@ -15,12 +15,14 @@ services:
       timeout: 5s
       retries: 10
 
-  backend:
+  migrate:
     build:
       context: ./backend
     env_file:
       - .env
     environment:
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change_me}
+      PILOT_CREDENTIALS_KEY: ${PILOT_CREDENTIALS_KEY:-change_me_too}
       DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_long.csv
       DEMO_SENSOR_PROFILE_PATH: /demo-dataset/sensor_profile_canonical.json
       DEMO_DATASET_ROW_LIMIT: "-1"
@@ -29,9 +31,29 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    restart: "no"
+    command: sh -c "alembic upgrade head"
+
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - .env
+    environment:
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change_me}
+      PILOT_CREDENTIALS_KEY: ${PILOT_CREDENTIALS_KEY:-change_me_too}
+      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_long.csv
+      DEMO_SENSOR_PROFILE_PATH: /demo-dataset/sensor_profile_canonical.json
+      DEMO_DATASET_ROW_LIMIT: "-1"
+    volumes:
+      - ../../dataset/pilot_sensor_dataset_2026-05-31_reduction:/demo-dataset:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     restart: on-failure
     ports:
       - "8000:8000"
+    command: sh -c "python -m app.cli seed-demo-admin && python -u -m app.cli seed-demo-data && uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
   sync-worker:
     build:
@@ -39,16 +61,18 @@ services:
     env_file:
       - .env
     environment:
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change_me}
+      PILOT_CREDENTIALS_KEY: ${PILOT_CREDENTIALS_KEY:-change_me_too}
       DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_long.csv
       DEMO_SENSOR_PROFILE_PATH: /demo-dataset/sensor_profile_canonical.json
       DEMO_DATASET_ROW_LIMIT: "-1"
     volumes:
       - ../../dataset/pilot_sensor_dataset_2026-05-31_reduction:/demo-dataset:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: on-failure
-    command: python -u -m app.cli sync-worker
+    command: sh -c "python -u -m app.cli sync-worker"
 
   frontend:
     build:

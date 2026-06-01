@@ -15,25 +15,7 @@ services:
       timeout: 5s
       retries: 10
 
-  backend:
-    build: .
-    environment:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/diplom2
-      JWT_SECRET_KEY: change-me-in-real-deployments-please-rotate
-      USE_DEMO_DATA: "true"
-      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_long.csv
-      DEMO_SENSOR_PROFILE_PATH: /demo-dataset/sensor_profile_canonical.json
-      DEMO_DATASET_ROW_LIMIT: "-1"
-    ports:
-      - "8000:8000"
-    volumes:
-      - ../../../dataset/pilot_sensor_dataset_2026-05-31_reduction:/demo-dataset:ro
-    depends_on:
-      db:
-        condition: service_healthy
-    command: sh -c "alembic upgrade head && python -m app.cli seed-demo-admin && python -u -m app.cli seed-demo-data && uvicorn app.main:app --host 0.0.0.0 --port 8000"
-
-  sync-worker:
+  migrate:
     build: .
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/diplom2
@@ -48,7 +30,43 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: sh -c "alembic upgrade head && python -u -m app.cli sync-worker"
+    restart: "no"
+    command: sh -c "alembic upgrade head"
+
+  backend:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/diplom2
+      JWT_SECRET_KEY: change-me-in-real-deployments-please-rotate
+      USE_DEMO_DATA: "true"
+      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_long.csv
+      DEMO_SENSOR_PROFILE_PATH: /demo-dataset/sensor_profile_canonical.json
+      DEMO_DATASET_ROW_LIMIT: "-1"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../../dataset/pilot_sensor_dataset_2026-05-31_reduction:/demo-dataset:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: sh -c "python -m app.cli seed-demo-admin && python -u -m app.cli seed-demo-data && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  sync-worker:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/diplom2
+      JWT_SECRET_KEY: change-me-in-real-deployments-please-rotate
+      PILOT_CREDENTIALS_KEY: change-me-in-real-deployments-please-rotate
+      USE_DEMO_DATA: "true"
+      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_long.csv
+      DEMO_SENSOR_PROFILE_PATH: /demo-dataset/sensor_profile_canonical.json
+      DEMO_DATASET_ROW_LIMIT: "-1"
+    volumes:
+      - ../../../dataset/pilot_sensor_dataset_2026-05-31_reduction:/demo-dataset:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: sh -c "python -u -m app.cli sync-worker"
 
 volumes:
   postgres_data:
