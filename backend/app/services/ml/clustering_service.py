@@ -45,7 +45,7 @@ class ClusteringService:
 
     @staticmethod
     def _label_runs(matrix: Any, cluster_count: int) -> list[tuple[list[int], str]]:
-        runs = [ClusteringService._quantile_labels(matrix, cluster_count, "agglomerative_fallback")]
+        runs = [ClusteringService._quantile_labels(matrix, cluster_count, "quantile_baseline")]
         try:
             kmeans_class = import_module("sklearn.cluster").KMeans
             model = kmeans_class(n_clusters=cluster_count, random_state=42, n_init=10)
