@@ -63,6 +63,10 @@ def upgrade() -> None:
     op.create_index(op.f("ix_ml_results_result_type"), "ml_results", ["result_type"])
     op.create_index(op.f("ix_ml_results_vehicle_id"), "ml_results", ["vehicle_id"])
 
+    op.create_table("ml_model_runs", id_col(), sa.Column("run_type", sa.String(length=64), nullable=False), sa.Column("model_name", sa.String(length=128), nullable=False), sa.Column("status", sa.String(length=32), nullable=False), sa.Column("row_count", sa.Integer(), nullable=False), sa.Column("feature_names", sa.JSON(), nullable=False), sa.Column("metrics", sa.JSON(), nullable=False), sa.Column("parameters", sa.JSON(), nullable=False), sa.Column("created_at", sa.DateTime(timezone=True), nullable=False), sa.PrimaryKeyConstraint("id"))
+    op.create_index(op.f("ix_ml_model_runs_run_type"), "ml_model_runs", ["run_type"])
+    op.create_index(op.f("ix_ml_model_runs_status"), "ml_model_runs", ["status"])
+
     op.create_table("sync_logs", id_col(), sa.Column("sync_type", sa.String(64), nullable=False), sa.Column("status", sa.String(32), nullable=False), sa.Column("message", sa.String(1000)), sa.Column("started_at", sa.DateTime(timezone=True), nullable=False), sa.Column("finished_at", sa.DateTime(timezone=True)), sa.Column("payload", sa.JSON()), sa.PrimaryKeyConstraint("id"))
     op.create_index(op.f("ix_sync_logs_sync_type"), "sync_logs", ["sync_type"])
 
@@ -71,5 +75,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    for table in ["reports", "sync_logs", "ml_results", "vehicle_rating_windows", "vehicle_metric_windows", "sensor_readings", "analytics_sensor_links", "vehicle_sensors", "drivers", "vehicles", "users"]:
+    for table in ["reports", "sync_logs", "ml_model_runs", "ml_results", "vehicle_rating_windows", "vehicle_metric_windows", "sensor_readings", "analytics_sensor_links", "vehicle_sensors", "drivers", "vehicles", "users"]:
         op.drop_table(table)
