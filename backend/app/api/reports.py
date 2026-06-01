@@ -10,7 +10,7 @@ import io
 from app.api import deps
 from app.api.vehicles import _load_vehicle_with_analytics, _load_vehicles_with_analytics
 from app.config.analytics_sensors import TOTAL_ANALYTICS_SENSORS
-from app.db.models import Vehicle
+from app.db.models import User, Vehicle
 from app.db.session import get_db
 
 
@@ -80,12 +80,13 @@ def _conclusions(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
 @router.get("/fleet")
 def fleet_report(
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_fleet_access_user)],
     period: str = "week",
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> dict[str, Any]:
     start, end, normalized_period = _period_dates(period, date_from, date_to)
-    vehicles = _load_vehicles_with_analytics(db)
+    vehicles = _load_vehicles_with_analytics(db, current_user)
     rows = _vehicle_rows(vehicles, start, end)
     comparison = [{key: value for key, value in row.items() if key != "vehicle"} for row in rows]
     fleet_rating = round(sum(row["rating"] for row in comparison) / len(comparison), 2) if comparison else 0.0
@@ -116,12 +117,13 @@ def fleet_report(
 def vehicle_report(
     vehicle_id: str,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_fleet_access_user)],
     period: str = "week",
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> dict[str, Any]:
     start, end, normalized_period = _period_dates(period, date_from, date_to)
-    vehicle = _load_vehicle_with_analytics(db, vehicle_id)
+    vehicle = _load_vehicle_with_analytics(db, current_user, vehicle_id)
     if not vehicle:
         raise HTTPException(status_code=404, detail="Машина не найдена")
     scoped_rows = _vehicle_rows([vehicle], start, end)
@@ -159,6 +161,7 @@ def vehicle_report(
 @router.get("/export/csv")
 def export_csv(
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_fleet_access_user)],
     period: str = "week",
     object_type: str = Query(default="fleet"),
     vehicle_id: str | None = None,
@@ -167,10 +170,10 @@ def export_csv(
 ) -> Response:
     start, end, _ = _period_dates(period, date_from, date_to)
     if object_type == "vehicle" and vehicle_id:
-        vehicle = _load_vehicle_with_analytics(db, vehicle_id)
+        vehicle = _load_vehicle_with_analytics(db, current_user, vehicle_id)
         rows = _vehicle_rows([vehicle], start, end) if vehicle else []
     else:
-        rows = _vehicle_rows(_load_vehicles_with_analytics(db), start, end)
+        rows = _vehicle_rows(_load_vehicles_with_analytics(db, current_user), start, end)
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(["plate_number", "name", "vehicle_type", "rating", "fuel_per_100km", "idle_ratio", "coasting_ratio", "optimal_rpm_ratio", "brakes_per_100km", "high_speed_brakes_per_100km", "cruise_control_ratio", "overspeed_ratio", "analytics_readiness_percent", "last_sync_at"])

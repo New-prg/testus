@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.api import deps
 from app.api.vehicles import _load_vehicles_with_analytics
 from app.config.analytics_sensors import TOTAL_ANALYTICS_SENSORS
-from app.db.models import MLResult, Vehicle
+from app.db.models import MLResult, User, Vehicle
 from app.db.session import get_db
 
 
@@ -94,12 +94,16 @@ def _aggregate_vehicle_rows(vehicles: list[Vehicle], start: datetime, end: datet
 
 
 @router.get("/summary")
-def summary(db: Annotated[Session, Depends(get_db)], period: str = "week") -> dict[str, Any]:
+def summary(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_fleet_access_user)],
+    period: str = "week",
+) -> dict[str, Any]:
     current_start, current_end, previous_start, previous_end = _window(period)
-    vehicles = _load_vehicles_with_analytics(db)
+    vehicles = _load_vehicles_with_analytics(db, current_user)
     rows = _aggregate_vehicle_rows(vehicles, current_start, current_end)
     previous_rows = _aggregate_vehicle_rows(vehicles, previous_start, previous_end)
-    anomaly_count = db.query(MLResult).filter(MLResult.result_type == "anomaly").count()
+    anomaly_count = db.query(MLResult).join(Vehicle, Vehicle.id == MLResult.vehicle_id).filter(MLResult.result_type == "anomaly", Vehicle.user_id == current_user.id).count()
     fleet_rating = round(sum(row["rating"] for row in rows) / len(rows), 2) if rows else 0.0
     previous_rating = round(sum(row["rating"] for row in previous_rows) / len(previous_rows), 2) if previous_rows else 0.0
     metric_scores = _score_summary(rows)
@@ -128,9 +132,13 @@ def summary(db: Annotated[Session, Depends(get_db)], period: str = "week") -> di
 
 
 @router.get("/timeseries")
-def timeseries(db: Annotated[Session, Depends(get_db)], period: str = "week") -> list[dict[str, Any]]:
+def timeseries(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_fleet_access_user)],
+    period: str = "week",
+) -> list[dict[str, Any]]:
     current_start, current_end, _, _ = _window(period)
-    vehicles = _load_vehicles_with_analytics(db)
+    vehicles = _load_vehicles_with_analytics(db, current_user)
     metric_rows = [m for vehicle in vehicles for m in vehicle.metric_windows if m.period_start >= current_start and m.period_end <= current_end]
     grouped: dict[str, dict[str, Any]] = {}
     for row in metric_rows:
@@ -153,18 +161,30 @@ def timeseries(db: Annotated[Session, Depends(get_db)], period: str = "week") ->
 
 
 @router.get("/comparison")
-def comparison(db: Annotated[Session, Depends(get_db)], period: str = "week") -> list[dict[str, Any]]:
+def comparison(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_fleet_access_user)],
+    period: str = "week",
+) -> list[dict[str, Any]]:
     current_start, current_end, _, _ = _window(period)
-    vehicles = _load_vehicles_with_analytics(db)
+    vehicles = _load_vehicles_with_analytics(db, current_user)
     return sorted(_aggregate_vehicle_rows(vehicles, current_start, current_end), key=lambda row: row["rating"], reverse=True)
 
 
 @router.get("/problem-vehicles")
-def problem_vehicles(db: Annotated[Session, Depends(get_db)], period: str = "week") -> dict[str, Any]:
+def problem_vehicles(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_fleet_access_user)],
+    period: str = "week",
+) -> dict[str, Any]:
     current_start, current_end, _, _ = _window(period)
-    vehicles = _load_vehicles_with_analytics(db)
+    vehicles = _load_vehicles_with_analytics(db, current_user)
     rows = sorted(_aggregate_vehicle_rows(vehicles, current_start, current_end), key=lambda row: row["rating"])
-    anomaly_ids = {result.vehicle_id for result in db.scalars(select(MLResult).where(MLResult.result_type == "anomaly")).all() if result.vehicle_id}
+    anomaly_ids = {
+        result.vehicle_id
+        for result in db.scalars(select(MLResult).join(Vehicle, Vehicle.id == MLResult.vehicle_id).where(MLResult.result_type == "anomaly", Vehicle.user_id == current_user.id)).all()
+        if result.vehicle_id
+    }
 
     def enrich(row: dict[str, Any]) -> dict[str, Any]:
         return row | {
