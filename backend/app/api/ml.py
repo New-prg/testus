@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
@@ -33,11 +34,35 @@ def recalculate(
     _persist_runs(db, "forecast", forecasts, len(rows))
     for result in anomalies.get("results", []):
         if result.get("label") == "anomaly":
-            db.add(MLResult(result_type="anomaly", vehicle_id=result.get("vehicle_id"), period_start=None, period_end=None, payload=result))
+            db.add(
+                MLResult(
+                    result_type="anomaly",
+                    vehicle_id=result.get("vehicle_id"),
+                    period_start=_parse_period(result.get("period_start")),
+                    period_end=_parse_period(result.get("period_end")),
+                    payload=result,
+                )
+            )
     for result in clusters.get("results", []):
-        db.add(MLResult(result_type="cluster", vehicle_id=result.get("vehicle_id"), payload=result))
+        db.add(
+            MLResult(
+                result_type="cluster",
+                vehicle_id=result.get("vehicle_id"),
+                period_start=_parse_period(result.get("period_start")),
+                period_end=_parse_period(result.get("period_end")),
+                payload=result,
+            )
+        )
     for result in forecasts.get("results", []):
-        db.add(MLResult(result_type="forecast", vehicle_id=result.get("vehicle_id"), payload=result))
+        db.add(
+            MLResult(
+                result_type="forecast",
+                vehicle_id=result.get("vehicle_id"),
+                period_start=_parse_period(result.get("period_start")),
+                period_end=_parse_period(result.get("period_end")),
+                payload=result,
+            )
+        )
     db.commit()
     return {"anomalies": anomalies, "clusters": clusters, "forecasts": forecasts}
 
@@ -138,3 +163,12 @@ def _metrics_summary(metrics: dict[str, Any]) -> list[dict[str, Any]]:
                 if isinstance(nested_value, int | float) or nested_value is None:
                     summary.append({"name": f"{key}.{nested_key}", "value": nested_value})
     return summary
+
+
+def _parse_period(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
