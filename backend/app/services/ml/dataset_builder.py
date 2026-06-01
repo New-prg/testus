@@ -3,7 +3,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import VehicleMetricWindow, VehicleRatingWindow
+from app.db.models import Vehicle, VehicleMetricWindow, VehicleRatingWindow
 
 
 class FeatureBuilder:
@@ -24,19 +24,16 @@ class FeatureBuilder:
     ]
     feature_names = [*metric_feature_names]
 
-    def build(self, db: Session, limit: int = 500) -> list[dict[str, Any]]:
-        metrics = db.scalars(
-            select(VehicleMetricWindow)
-            .order_by(VehicleMetricWindow.period_start.desc())
-            .limit(min(limit, 1000))
-        ).all()
+    def build(self, db: Session, limit: int = 500, user_id: str | None = None) -> list[dict[str, Any]]:
+        metrics_query = select(VehicleMetricWindow).order_by(VehicleMetricWindow.period_start.desc()).limit(min(limit, 1000))
+        ratings_query = select(VehicleRatingWindow).order_by(VehicleRatingWindow.period_start.desc()).limit(min(limit, 1000))
+        if user_id:
+            metrics_query = metrics_query.join(Vehicle, Vehicle.id == VehicleMetricWindow.vehicle_id).where(Vehicle.user_id == user_id)
+            ratings_query = ratings_query.join(Vehicle, Vehicle.id == VehicleRatingWindow.vehicle_id).where(Vehicle.user_id == user_id)
+        metrics = db.scalars(metrics_query).all()
         ratings = {
             (rating.vehicle_id, rating.period_start, rating.period_end): rating
-            for rating in db.scalars(
-                select(VehicleRatingWindow)
-                .order_by(VehicleRatingWindow.period_start.desc())
-                .limit(min(limit, 1000))
-            ).all()
+            for rating in db.scalars(ratings_query).all()
         }
         rows: list[dict[str, Any]] = []
         for metric in metrics:

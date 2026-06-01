@@ -6,7 +6,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.db.models import MLModelRun, MLResult
+from app.db.models import MLModelRun, MLResult, User, Vehicle
 from app.db.session import get_db
 from app.services.ml.anomaly_service import AnomalyService
 from app.services.ml.clustering_service import ClusteringService
@@ -20,15 +20,17 @@ router = APIRouter(prefix="/ml", tags=["ml"], dependencies=[Depends(deps.get_fle
 @router.post("/recalculate")
 def recalculate(
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_fleet_access_user)],
     _: Annotated[Any, Depends(deps.get_admin_user)],
     limit: Annotated[int, Query(ge=10, le=1000)] = 500,
 ) -> dict[str, Any]:
-    rows = FeatureBuilder().build(db, limit)
+    rows = FeatureBuilder().build(db, limit, user_id=current_user.id)
     anomalies = AnomalyService().detect(rows)
     clusters = ClusteringService().cluster(rows)
     forecasts = ForecastingService().forecast(rows)
 
-    db.execute(delete(MLResult).where(MLResult.result_type.in_(["anomaly", "cluster", "forecast"])))
+    scoped_vehicle_ids = select(Vehicle.id).where(Vehicle.user_id == current_user.id)
+    db.execute(delete(MLResult).where(MLResult.result_type.in_(["anomaly", "cluster", "forecast"]), MLResult.vehicle_id.in_(scoped_vehicle_ids)))
     _persist_runs(db, "anomaly", anomalies, len(rows))
     _persist_runs(db, "cluster", clusters, len(rows))
     _persist_runs(db, "forecast", forecasts, len(rows))
@@ -74,29 +76,44 @@ def model_comparison(db: Annotated[Session, Depends(get_db)], limit: int = 20) -
 
 
 @router.get("/anomalies")
-def anomalies(db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
-    results = db.query(MLResult).filter(MLResult.result_type == "anomaly").order_by(MLResult.created_at.desc()).all()
+def anomalies(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_fleet_access_user)],
+) -> dict[str, Any]:
+    results = db.query(MLResult).join(Vehicle, Vehicle.id == MLResult.vehicle_id).filter(MLResult.result_type == "anomaly", Vehicle.user_id == current_user.id).order_by(MLResult.created_at.desc()).all()
     return {"results": [result.payload for result in results]}
 
 
 @router.get("/clusters")
-def clusters(db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
-    results = db.query(MLResult).filter(MLResult.result_type == "cluster").order_by(MLResult.created_at.desc()).all()
+def clusters(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_fleet_access_user)],
+) -> dict[str, Any]:
+    results = db.query(MLResult).join(Vehicle, Vehicle.id == MLResult.vehicle_id).filter(MLResult.result_type == "cluster", Vehicle.user_id == current_user.id).order_by(MLResult.created_at.desc()).all()
     return {"results": [result.payload for result in results]}
 
 
 @router.get("/forecasts")
-def forecasts(db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
-    results = db.query(MLResult).filter(MLResult.result_type == "forecast").order_by(MLResult.created_at.desc()).all()
+def forecasts(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_fleet_access_user)],
+) -> dict[str, Any]:
+    results = db.query(MLResult).join(Vehicle, Vehicle.id == MLResult.vehicle_id).filter(MLResult.result_type == "forecast", Vehicle.user_id == current_user.id).order_by(MLResult.created_at.desc()).all()
     return {"results": [result.payload for result in results]}
 
 
 @router.get("/explanations/{vehicle_id}")
-def explanations(vehicle_id: str, db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
+def explanations(
+    vehicle_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_fleet_access_user)],
+) -> dict[str, Any]:
     rows = (
         db.query(MLResult)
+        .join(Vehicle, Vehicle.id == MLResult.vehicle_id)
         .filter(MLResult.vehicle_id == vehicle_id)
         .filter(MLResult.result_type.in_(["anomaly", "cluster", "forecast"]))
+        .filter(Vehicle.user_id == current_user.id)
         .order_by(MLResult.created_at.desc())
         .all()
     )
