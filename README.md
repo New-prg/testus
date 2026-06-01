@@ -15,7 +15,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-The default demo startup mounts `../../dataset/pilot_sensor_dataset_2026-05-31_reduction` into the backend container and seeds statistics from `telematics_reduced_long.csv`. `sensor_profile_canonical.json` is kept as the profile sidecar for the same demo dataset.
+The default demo startup mounts the repo-root `telematics_reduced_wide_demo.csv` into the backend container and seeds statistics from that file.
 
 - Frontend: http://localhost:5173
 - Backend: http://localhost:8000
@@ -49,7 +49,7 @@ docker compose exec backend alembic downgrade -1
 ## Pilot-GPS integration
 
 - Demo mode is enabled by default with `USE_DEMO_DATA=true`.
-- The default demo statistics source is the reduced weekly local dataset (`telematics_reduced_long.csv`), with fallback to the generated demo Pilot provider when that dataset is unavailable.
+- The default demo statistics source is the repo-root precomputed demo dataset (`telematics_reduced_wide_demo.csv`), expanded into normalized telemetry rows at import time. If that dataset is unavailable, demo seeding now fails fast.
 - Live integration uses only official/publicly documented Pilot-GPS areas for vehicle listing and current sensor status; historical calibrated sensor import remains an extension point.
 - Raw external data is preserved in JSON fields.
 
@@ -99,12 +99,12 @@ docker compose exec backend python -m app.cli import-dataset --path /app/path/to
 
 Supported formats: CSV, JSON, JSONL. Imported rows are normalized into `Vehicle`, `VehicleSensor`, and `SensorReading`, then daily metrics and ratings are recalculated for the imported period.
 
-The built-in demo seed uses this same importer path, so manual dataset import and `seed-demo` stay aligned.
+The built-in demo seed uses this same importer path, so manual dataset import and `seed-demo` stay aligned. Wide rows are expanded into one normalized sensor reading per telemetry column during import.
 
 ## Known limitations
 
 - Live historical calibrated sensor values from official Pilot-GPS public docs remain partially undocumented.
-- Demo provider is the default source for a guaranteed thesis demo flow.
+- Static demo dataset is the default source for a guaranteed thesis demo flow.
 - PDF export is intentionally omitted in MVP scope.
 
 ## API blockers

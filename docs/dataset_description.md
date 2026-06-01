@@ -61,4 +61,4 @@ It also accepts the reduced long-form telematics layout used by the demo dataset
 
 Pilot-GPS is only one possible source of telemetry. In the thesis framing, the central object of study is the ML analytics pipeline over telematics data, not the external provider itself.
 
-The default demo seed uses the reduced weekly dataset (`telematics_reduced_long.csv`) as the reproducible source of operational statistics, with `sensor_profile_canonical.json` kept beside it as the matching sensor profile sidecar.
+The default demo seed uses the repo-root precomputed demo dataset (`telematics_reduced_wide_demo.csv`) as the reproducible source of operational statistics. During import, each wide row is expanded into multiple normalized sensor rows (`speed`, `fuel_consumption`, `distance`, `engine_work_time`, `idle_time`, `brake_pedal`, `overspeed`, `coasting`, `optimal_rpm`, `cruise_control`) before vehicles, sensors, and readings are upserted.

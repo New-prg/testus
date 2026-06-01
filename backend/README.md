@@ -10,7 +10,7 @@ docker compose up --build
 ```
 
 The compose command runs migrations, seeds demo data when `USE_DEMO_DATA=true`, and starts the API on `http://localhost:8000`.
-By default this demo seed now prefers the reduced weekly dataset mounted into the container at `/demo-dataset/telematics_reduced_long.csv`, with `sensor_profile_canonical.json` kept alongside it as the profile sidecar for the same demo source.
+By default this demo seed now prefers the repo-root precomputed demo dataset mounted into the container at `/demo-dataset/telematics_reduced_wide_demo.csv`.
 
 Demo admin account:
 
@@ -33,9 +33,9 @@ uvicorn app.main:app --reload
 
 - `DATABASE_URL` - SQLAlchemy database URL, PostgreSQL in production/compose.
 - `JWT_SECRET_KEY` - required replacement for any non-demo deployment.
-- `USE_DEMO_DATA` - defaults to `true`; seed flows prefer the mounted reduced local dataset and fall back to the generated demo Pilot provider when the dataset is unavailable.
+- `USE_DEMO_DATA` - defaults to `true`; seed flows require the mounted precomputed local demo dataset and fail fast when the dataset is unavailable.
 - `DEMO_DATASET_PATH` - optional path to the mounted demo dataset CSV/JSON/JSONL file.
-- `DEMO_SENSOR_PROFILE_PATH` - optional sidecar profile path for the same demo dataset.
+- `DEMO_SENSOR_PROFILE_PATH` - optional sidecar profile path; not required for the built-in wide demo dataset.
 - `DEMO_DATASET_ROW_LIMIT` - optional cap for demo dataset rows; use `-1` to import the full dataset.
 - `PILOT_*_URL` - optional official Pilot-GPS URLs supplied by deployment. Credentials are intentionally not documented or hardcoded.
 
@@ -56,6 +56,6 @@ python -m app.cli import-dataset --path ./path/to/dataset.csv
 
 Supported formats: CSV, JSON, JSONL. The importer writes normalized vehicles, sensors, and readings into the existing tables and then recalculates daily metric and rating windows for the imported time range.
 
-For the thesis demo path, `seed-demo` now uses the reduced weekly dataset by default when `/demo-dataset/telematics_reduced_long.csv` is mounted, so `docker compose up --build` and `python -m app.cli seed-demo` produce dashboard/ML statistics from the same reproducible source.
+For the thesis demo path, `seed-demo` now uses the repo-root precomputed demo dataset by default when `/demo-dataset/telematics_reduced_wide_demo.csv` is mounted, so `docker compose up --build` and `python -m app.cli seed-demo` produce dashboard/ML statistics from the same reproducible source. The importer expands each wide row into one reading per telemetry column before deriving metrics and ratings.
 
 Pilot-GPS calibrated historical sensor values are still treated as an integration blocker until official endpoint semantics are confirmed; demo mode and `raw_json` preservation remain the default safe path.
