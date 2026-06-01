@@ -36,6 +36,7 @@ uvicorn app.main:app --reload
 - `USE_DEMO_DATA` - defaults to `true`; seed flows prefer the mounted reduced local dataset and fall back to the generated demo Pilot provider when the dataset is unavailable.
 - `DEMO_DATASET_PATH` - optional path to the mounted demo dataset CSV/JSON/JSONL file.
 - `DEMO_SENSOR_PROFILE_PATH` - optional sidecar profile path for the same demo dataset.
+- `DEMO_DATASET_ROW_LIMIT` - optional cap for demo dataset rows; use `-1` to import the full dataset.
 - `PILOT_*_URL` - optional official Pilot-GPS URLs supplied by deployment. Credentials are intentionally not documented or hardcoded.
 
 ## Main API groups
