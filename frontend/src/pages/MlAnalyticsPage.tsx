@@ -15,6 +15,7 @@ import {
   getMlVehicleExplanations,
   recalculateMl,
 } from '../api/ml';
+import { ApiError } from '../api/client';
 import { EmptyState, ErrorState, LoadingState } from '../components/cards/StateViews';
 import { useAuth } from '../components/layout/AuthProvider';
 
@@ -582,7 +583,11 @@ export function MlAnalyticsPage() {
       );
       await loadMlData();
     } catch (unknownError) {
-      setError(unknownError instanceof Error ? unknownError.message : 'Не удалось пересчитать ML-модели.');
+      if (unknownError instanceof ApiError && unknownError.status === 403) {
+        setError('Пересчёт ML доступен только администратору.');
+      } else {
+        setError(unknownError instanceof Error ? unknownError.message : 'Не удалось пересчитать ML-модели.');
+      }
     } finally {
       setIsRecalculating(false);
     }
