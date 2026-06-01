@@ -20,6 +20,11 @@ services:
       context: ./backend
     env_file:
       - .env
+    environment:
+      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_long.csv
+      DEMO_SENSOR_PROFILE_PATH: /demo-dataset/sensor_profile_canonical.json
+    volumes:
+      - ../../dataset/pilot_sensor_dataset_2026-05-31_reduction:/demo-dataset:ro
     depends_on:
       postgres:
         condition: service_healthy

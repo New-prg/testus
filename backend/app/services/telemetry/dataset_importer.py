@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
-from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.config.analytics_sensors import ANALYTICS_SENSORS, resolve_analytics_key
 from app.config.rating_profile import CAR_TYPE_UNKNOWN
 from app.db.models import AnalyticsSensorLink, SensorReading, Vehicle, VehicleSensor
+from app.services.telemetry.provider import TelemetryProvider
 from app.services.pilot_gps.normalization import first_not_empty, normalize_sensor
 from app.services.ratings.metric_calculator import MetricCalculator
 from app.services.ratings.rating_calculator import RatingCalculator
@@ -41,19 +42,16 @@ class DatasetImportResult:
         }
 
 
-class DatasetProvider(ABC):
-    """Abstraction for dataset sources that can feed telemetry import."""
-
-    @abstractmethod
-    def iter_rows(self) -> list[dict[str, Any]]:
-        raise NotImplementedError
+DatasetProvider = TelemetryProvider
 
 
-class LocalDatasetProvider(DatasetProvider):
-    """Streams local CSV, JSON, or JSONL telemetry rows without requiring pandas."""
+class LocalDatasetProvider(TelemetryProvider):
+    """Streams local CSV, JSON, or JSONL telemetry rows for reproducible demos."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, max_size_bytes: int = MAX_DATASET_SIZE_BYTES, row_limit: int = MAX_IMPORT_ROWS) -> None:
         self.path = Path(path).expanduser().resolve()
+        self.max_size_bytes = max_size_bytes
+        self.row_limit = row_limit
         self._validate_path()
 
     def _validate_path(self) -> None:
@@ -61,45 +59,55 @@ class LocalDatasetProvider(DatasetProvider):
             raise ValueError(f"Dataset file does not exist: {self.path}")
         if self.path.is_symlink():
             raise ValueError(f"Dataset symlinks are not allowed: {self.path}")
-        if self.path.stat().st_size > MAX_DATASET_SIZE_BYTES:
+        if self.max_size_bytes >= 0 and self.path.stat().st_size > self.max_size_bytes:
             raise ValueError(f"Dataset is too large: {self.path}")
 
-    def iter_rows(self) -> list[dict[str, Any]]:
+    def iter_rows(self) -> Iterable[dict[str, Any]]:
         suffix = self.path.suffix.lower()
         if suffix == ".csv":
             with self.path.open(newline="", encoding="utf-8") as file:
-                rows = [dict(row) for row in csv.DictReader(file)]
-                self._validate_row_count(len(rows))
-                return rows
+                for row_count, row in enumerate(csv.DictReader(file), start=1):
+                    self._validate_row_count(row_count)
+                    yield dict(row)
+                return
         if suffix == ".jsonl":
-            rows: list[dict[str, Any]] = []
             with self.path.open(encoding="utf-8") as file:
+                row_count = 0
                 for line in file:
                     if line.strip():
                         payload = json.loads(line)
                         if isinstance(payload, dict):
-                            rows.append(payload)
-            self._validate_row_count(len(rows))
-            return rows
+                            row_count += 1
+                            self._validate_row_count(row_count)
+                            yield payload
+                return
         if suffix == ".json":
             with self.path.open(encoding="utf-8") as file:
                 payload = json.load(file)
             if isinstance(payload, list):
-                rows = [row for row in payload if isinstance(row, dict)]
-                self._validate_row_count(len(rows))
-                return rows
+                row_count = 0
+                for row in payload:
+                    if isinstance(row, dict):
+                        row_count += 1
+                        self._validate_row_count(row_count)
+                        yield row
+                return
             if isinstance(payload, dict):
                 nested_rows: Any = payload.get("rows") or payload.get("data") or payload.get("records")
                 if isinstance(nested_rows, list):
-                    rows = [row for row in nested_rows if isinstance(row, dict)]
-                    self._validate_row_count(len(rows))
-                    return rows
-                return [payload]
+                    row_count = 0
+                    for row in nested_rows:
+                        if isinstance(row, dict):
+                            row_count += 1
+                            self._validate_row_count(row_count)
+                            yield row
+                    return
+                yield payload
+                return
         raise ValueError(f"Unsupported dataset format: {self.path}")
 
-    @staticmethod
-    def _validate_row_count(row_count: int) -> None:
-        if row_count > MAX_IMPORT_ROWS:
+    def _validate_row_count(self, row_count: int) -> None:
+        if self.row_limit >= 0 and row_count > self.row_limit:
             raise ValueError(f"Dataset contains too many rows: {row_count}")
 
 
@@ -115,8 +123,13 @@ class DatasetImporter:
         skipped_rows = 0
         min_timestamp: datetime | None = None
         max_timestamp: datetime | None = None
+        flush_interval = 5_000
+        processed_rows = 0
 
         for raw_row in provider.iter_rows():
+            processed_rows += 1
+            if processed_rows % 50_000 == 0:
+                print(f"[seed-demo] Processed {processed_rows} source rows, inserted {inserted_readings} readings", flush=True)
             expanded_rows = self._expand_row(raw_row)
             if not expanded_rows:
                 skipped_rows += 1
@@ -131,6 +144,9 @@ class DatasetImporter:
                 created_sensors += int(created)
                 if self._insert_reading(db, vehicle, sensor, normalized):
                     inserted_readings += 1
+                    if inserted_readings % flush_interval == 0:
+                        db.flush()
+                        db.expunge_all()
                 imported_vehicle_ids.add(vehicle.id)
                 timestamp = normalized["timestamp"]
                 min_timestamp = timestamp if min_timestamp is None else min(min_timestamp, timestamp)
@@ -139,6 +155,10 @@ class DatasetImporter:
         db.flush()
         metric_windows = self._derive_metrics_and_ratings(db, imported_vehicle_ids, min_timestamp, max_timestamp)
         db.commit()
+        print(
+            f"[seed-demo] Import complete: vehicles={len(imported_vehicle_ids)} sensors={created_sensors} readings={inserted_readings} metric_windows={metric_windows} skipped_rows={skipped_rows}",
+            flush=True,
+        )
         return DatasetImportResult(
             vehicles=len(imported_vehicle_ids),
             sensors=created_sensors,
@@ -172,11 +192,11 @@ class DatasetImporter:
         if timestamp is None or value is None:
             return None
         sensor_name = str(first_not_empty(sensor_payload.get("name"), row.get("sensor_name"), row.get("name"), row.get("fieldname"), "") or "")
-        analytics_key = first_not_empty(row.get("analytics_key"), sensor_payload.get("analytics_key"), row.get("sensor_key"), row.get("fieldname"))
+        analytics_key = first_not_empty(row.get("analytics_key"), row.get("canonical_feature"), sensor_payload.get("analytics_key"), row.get("sensor_key"), row.get("fieldname"))
         analytics_key = str(analytics_key) if analytics_key in ANALYTICS_SENSORS else resolve_analytics_key(sensor_name)
-        sensor_id = first_not_empty(sensor_payload.get("id"), sensor_payload.get("sensor_id"), sensor_payload.get("tag_id"), row.get("sensor_id"))
+        sensor_id = first_not_empty(sensor_payload.get("id"), sensor_payload.get("sensor_id"), sensor_payload.get("tag_id"), row.get("sensor_id"), row.get("local_sensor_id"))
         return {
-            "pilot_agent_id": str(first_not_empty(vehicle_payload.get("pilot_agent_id"), vehicle_payload.get("agentid"), vehicle_payload.get("agent_id"), vehicle_payload.get("vehicle_id"), vehicle_payload.get("imei"), vehicle_payload.get("plate_number"), vehicle_payload.get("vehiclenumber"), "local-dataset")),
+            "pilot_agent_id": str(first_not_empty(vehicle_payload.get("pilot_agent_id"), vehicle_payload.get("vehicle_agentid"), vehicle_payload.get("agentid"), vehicle_payload.get("agent_id"), vehicle_payload.get("vehicle_id"), vehicle_payload.get("vehicle_key"), vehicle_payload.get("imei"), vehicle_payload.get("plate_number"), vehicle_payload.get("vehiclenumber"), "local-dataset")),
             "imei": first_not_empty(vehicle_payload.get("imei"), vehicle_payload.get("uniqid"), vehicle_payload.get("unique_id")),
             "plate_number": first_not_empty(vehicle_payload.get("plate_number"), vehicle_payload.get("vehiclenumber"), vehicle_payload.get("number")),
             "name": str(first_not_empty(vehicle_payload.get("name"), vehicle_payload.get("title"), vehicle_payload.get("vehiclenumber"), vehicle_payload.get("plate_number"), "Dataset vehicle")),
@@ -189,7 +209,7 @@ class DatasetImporter:
             "unit": first_not_empty(sensor_payload.get("unit"), sensor_payload.get("measure_unit")),
             "timestamp": timestamp,
             "value": value,
-            "speed": self._parse_float(first_not_empty(row.get("speed"), row.get("speed_kmh"))),
+            "speed": self._parse_float(first_not_empty(row.get("speed"), row.get("speed_kmh"), row.get("speed_from_point"))),
             "raw_json": self._json_safe(row),
         }
 

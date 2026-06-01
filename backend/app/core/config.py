@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     pilot_gps_username: str | None = Field(default=None, alias="PILOT_GPS_USERNAME")
     pilot_gps_password: str | None = Field(default=None, alias="PILOT_GPS_PASSWORD")
     use_demo_data: bool = Field(default=True, alias="USE_DEMO_DATA")
+    demo_dataset_path: str | None = Field(default=None, alias="DEMO_DATASET_PATH")
+    demo_sensor_profile_path: str | None = Field(default=None, alias="DEMO_SENSOR_PROFILE_PATH")
+    demo_dataset_row_limit: int = Field(default=500_000, alias="DEMO_DATASET_ROW_LIMIT")
 
 
 @lru_cache

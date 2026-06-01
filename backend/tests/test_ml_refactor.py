@@ -1,13 +1,19 @@
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
+import alembic.command as alembic_command
+import pytest
+from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api import deps
-from app.db.models import User, Vehicle, VehicleMetricWindow, VehicleRatingWindow
+from app.core.config import get_settings
+from app.db.models import MLModelRun, MLResult, User, Vehicle, VehicleMetricWindow, VehicleRatingWindow
+from app.db.seed import seed_demo_data
 from app.db.session import Base, get_db
 from app.main import app
 from app.services.ml.anomaly_service import AnomalyService
@@ -107,6 +113,13 @@ def test_local_dataset_provider_implements_dataset_provider_abstraction() -> Non
     assert issubclass(LocalDatasetProvider, DatasetProvider)
 
 
+def test_dataset_provider_alias_matches_telemetry_provider() -> None:
+    from app.services.telemetry.provider import TelemetryProvider
+
+    assert DatasetProvider is TelemetryProvider
+    assert issubclass(LocalDatasetProvider, TelemetryProvider)
+
+
 def test_preprocessing_imputes_missing_values_without_nan() -> None:
     rows = [
         {"features": {"fuel_per_100km": None, "idle_ratio": 0.1}},
@@ -155,7 +168,9 @@ def test_clustering_service_returns_labels_and_metrics() -> None:
 
     model_names = {run["model_name"] for run in result["model_runs"]}
     assert any(name in model_names for name in {"kmeans", "kmeans_fallback"})
-    assert any(name in model_names for name in {"agglomerative_clustering", "agglomerative_fallback"})
+    assert "quantile_baseline" in model_names
+    if "agglomerative_clustering" in model_names:
+        assert "agglomerative_fallback" not in model_names
     first_metrics = result["model_runs"][0]["metrics"]
     assert first_metrics["clusters"] == 3
     assert "davies_bouldin_score" in first_metrics
@@ -173,12 +188,28 @@ def test_forecasting_service_returns_model_metrics() -> None:
     result = ForecastingService().forecast(rows)
 
     assert result["metrics"]["moving_average"]["samples"] > 0
+    assert result["metrics"]["evaluation"] == "time_based_holdout"
+    assert result["metrics"]["test_samples"] == len(result["results"])
+    assert result["metrics"]["test_samples"] < len(rows)
     assert result["metrics"]["random_forest"]["MAE"] is not None
     assert {"moving_average_baseline", "random_forest_regressor"} == {run["model_name"] for run in result["model_runs"]}
     assert "RMSE" in result["metrics"]["moving_average"]
     assert "R2" in result["metrics"]["moving_average"]
     assert result["results"]
     assert all("moving_average_forecast" in row and "random_forest_forecast" in row for row in result["results"])
+
+
+def test_forecasting_service_skips_when_holdout_is_not_possible() -> None:
+    db = build_session()
+    seed_ml_windows(db, vehicle_count=3, days=1)
+    rows = FeatureBuilder().build(db, limit=100)
+
+    result = ForecastingService().forecast(rows)
+
+    assert result["message"] != "ok"
+    assert result["metrics"]["evaluation"] == "time_based_holdout"
+    assert result["metrics"]["test_samples"] == 0
+    assert result["model_runs"][0]["metrics"]["MAE"] is None
 
 
 def test_dataset_importer_supports_repeated_rows_for_same_sensor() -> None:
@@ -215,6 +246,130 @@ def test_dataset_importer_supports_repeated_rows_for_same_sensor() -> None:
     assert result.sensors >= 1
 
 
+def test_local_dataset_provider_streams_rows_with_limit(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "rows.csv"
+    dataset_path.write_text(
+        "timestamp,value,sensor_name,sensor_id,vehicle_id,name\n"
+        "2026-01-01T00:00:00Z,1,Speed,s1,v1,Vehicle 1\n"
+        "2026-01-01T01:00:00Z,2,Speed,s1,v1,Vehicle 1\n",
+        encoding="utf-8",
+    )
+
+    provider = LocalDatasetProvider(dataset_path, row_limit=1)
+
+    with pytest.raises(ValueError, match="Dataset contains too many rows"):
+        list(provider.iter_rows())
+
+
+def test_dataset_importer_accepts_reduced_telematics_schema() -> None:
+    db = build_session()
+    importer = DatasetImporter()
+
+    result = importer.import_provider(
+        db,
+        _InMemoryDatasetProvider(
+            [
+                {
+                    "vehicle_key": "10039",
+                    "vehicle_agentid": "10039",
+                    "imei": "862059069276700",
+                    "vehiclenumber": "29-П Р762СР716",
+                    "vin": "XTC549015R2601687",
+                    "timestamp": "2026-05-24T03:11:20+00:00",
+                    "canonical_feature": "speed",
+                    "value": 45.0,
+                    "local_sensor_id": "72427",
+                    "sensor_name": "Скорость (тахограф)",
+                    "speed_from_point": 45.0,
+                }
+            ]
+        ),
+    )
+
+    vehicle = db.query(Vehicle).one()
+    sensor = vehicle.sensors[0]
+    reading = vehicle.readings[0]
+
+    assert result.vehicles == 1
+    assert vehicle.pilot_agent_id == "10039"
+    assert sensor.pilot_sensor_id == "72427"
+    assert reading.speed == 45.0
+
+
+def test_seed_demo_data_prefers_configured_dataset(monkeypatch, tmp_path: Path) -> None:
+    db = build_session()
+    dataset_path = tmp_path / "demo.csv"
+    dataset_path.write_text(
+        "vehicle_key,vehicle_agentid,imei,vehiclenumber,vin,timestamp,canonical_feature,value,local_sensor_id,sensor_name,speed_from_point\n"
+        "10039,10039,862059069276700,29-П Р762СР716,XTC549015R2601687,2026-05-24T03:11:20+00:00,speed,45.0,72427,Скорость (тахограф),45.0\n",
+        encoding="utf-8",
+    )
+    sensor_profile_path = tmp_path / "sensor_profile_canonical.json"
+    sensor_profile_path.write_text("[]", encoding="utf-8")
+
+    monkeypatch.setenv("DEMO_DATASET_PATH", str(dataset_path))
+    monkeypatch.setenv("DEMO_SENSOR_PROFILE_PATH", str(sensor_profile_path))
+    monkeypatch.setenv("DEMO_DATASET_ROW_LIMIT", "10")
+    get_settings.cache_clear()
+
+    try:
+        result = seed_demo_data(db)
+    finally:
+        get_settings.cache_clear()
+
+    assert result["source"] == "local_dataset"
+    assert result["dataset_path"] == str(dataset_path)
+    assert result["sensor_profile_path"] == str(sensor_profile_path)
+    assert result["dataset_row_limit"] == 10
+    assert result["vehicles"] == 1
+    assert db.query(User).filter(User.email == "admin@example.com").one()
+
+
+def test_seed_demo_data_resets_existing_demo_statistics_for_dataset(monkeypatch, tmp_path: Path) -> None:
+    db = build_session()
+    vehicle = Vehicle(name="Old demo", pilot_agent_id="old-demo", car_type="UNKNOWN")
+    db.add(vehicle)
+    db.flush()
+    db.add(MLResult(result_type="forecast", vehicle_id=vehicle.id, payload={"vehicle_id": vehicle.id}))
+    db.add(MLModelRun(run_type="forecast", model_name="old", status="success", row_count=1, feature_names=[], metrics={}, parameters={}))
+    db.commit()
+
+    dataset_path = tmp_path / "demo.csv"
+    dataset_path.write_text(
+        "vehicle_key,vehicle_agentid,imei,vehiclenumber,vin,timestamp,canonical_feature,value,local_sensor_id,sensor_name,speed_from_point\n"
+        "10040,10040,862059069276701,30-П Р762СР717,XTC549015R2601688,2026-05-24T03:11:20+00:00,speed,25.0,72428,Скорость (тахограф),25.0\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("DEMO_DATASET_PATH", str(dataset_path))
+    monkeypatch.setenv("DEMO_DATASET_ROW_LIMIT", "10")
+    monkeypatch.delenv("DEMO_SENSOR_PROFILE_PATH", raising=False)
+    get_settings.cache_clear()
+
+    try:
+        seed_demo_data(db)
+    finally:
+        get_settings.cache_clear()
+
+    assert {row.pilot_agent_id for row in db.query(Vehicle).all()} == {"10040"}
+    assert db.query(MLResult).count() == 0
+    assert db.query(MLModelRun).count() == 0
+
+
+def test_seed_demo_data_fails_fast_for_missing_configured_dataset(monkeypatch, tmp_path: Path) -> None:
+    db = build_session()
+    missing_dataset_path = tmp_path / "missing-demo.csv"
+
+    monkeypatch.setenv("DEMO_DATASET_PATH", str(missing_dataset_path))
+    get_settings.cache_clear()
+
+    try:
+        with pytest.raises(ValueError, match="Configured demo dataset path does not exist"):
+            seed_demo_data(db)
+    finally:
+        get_settings.cache_clear()
+
+
 def test_ml_model_comparison_endpoint_after_recalculate() -> None:
     db, factory = build_static_session()
     [admin] = [User(email="admin@example.com", password_hash="hash", full_name="Admin", role="admin")]
@@ -246,9 +401,77 @@ def test_ml_model_comparison_endpoint_after_recalculate() -> None:
     assert "moving_average_baseline" in model_names
     assert "random_forest_regressor" in model_names
     assert any(name in model_names for name in {"kmeans", "kmeans_fallback"})
-    assert any(name in model_names for name in {"agglomerative_clustering", "agglomerative_fallback"})
+    assert "quantile_baseline" in model_names
+    if "agglomerative_clustering" in model_names:
+        assert "agglomerative_fallback" not in model_names
     first_row = comparison_response.json()["results"][0]
     assert {"run_type", "model", "metrics", "created_at", "metrics_summary"}.issubset(first_row)
+
+
+def test_ml_recalculate_persists_result_periods() -> None:
+    db, factory = build_static_session()
+    admin = User(email="admin-periods@example.com", password_hash="hash", full_name="Admin", role="admin")
+    db.add(admin)
+    seed_ml_windows(db)
+
+    def override_db() -> Generator[Session, None, None]:
+        session = factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[deps.get_current_user] = lambda: admin
+    try:
+        client = TestClient(app)
+        response = client.post("/api/ml/recalculate")
+        persisted = factory().scalars(select(MLResult).where(MLResult.result_type.in_(["anomaly", "cluster", "forecast"]))).all()
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert persisted
+    assert all(row.period_start is not None and row.period_end is not None for row in persisted)
+
+
+def test_alembic_upgrade_creates_ml_model_runs_table(tmp_path: Path, monkeypatch) -> None:
+    database_path = tmp_path / "alembic-test.sqlite3"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    get_settings.cache_clear()
+    config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+    config.set_main_option("script_location", str(Path(__file__).resolve().parents[1] / "alembic"))
+
+    try:
+        alembic_command.upgrade(config, "head")
+        table_names = set(inspect(create_engine(database_url)).get_table_names())
+    finally:
+        get_settings.cache_clear()
+
+    assert "ml_model_runs" in table_names
+
+
+def test_alembic_upgrade_from_legacy_0002_revision_succeeds(tmp_path: Path, monkeypatch) -> None:
+    database_path = tmp_path / "alembic-legacy.sqlite3"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    get_settings.cache_clear()
+    config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+    config.set_main_option("script_location", str(Path(__file__).resolve().parents[1] / "alembic"))
+
+    try:
+        alembic_command.upgrade(config, "0001_initial")
+        engine = create_engine(database_url)
+        with engine.begin() as connection:
+            connection.exec_driver_sql("UPDATE alembic_version SET version_num = '0002_ml_model_runs'")
+        alembic_command.upgrade(config, "head")
+        with engine.connect() as connection:
+            current_revision = connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one()
+    finally:
+        get_settings.cache_clear()
+
+    assert current_revision == "0002_ml_model_runs"
 
 
 def test_ml_recalculate_requires_admin_user() -> None:

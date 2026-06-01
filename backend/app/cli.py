@@ -3,13 +3,28 @@ import argparse
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Backend management commands")
-    parser.add_argument("command", choices=["seed-demo", "import-pilot-current", "import-dataset"])
+    parser.add_argument("command", choices=["seed-demo", "seed-demo-admin", "seed-demo-data", "import-pilot-current", "import-dataset"])
     parser.add_argument("--path")
     parser.add_argument("--replace-shared-fleet", action="store_true")
     parser.add_argument("--anonymize", action="store_true")
     args = parser.parse_args()
 
     if args.command == "seed-demo":
+        from app.db.seed import seed_demo_data
+        from app.db.session import SessionLocal
+
+        with SessionLocal() as db:
+            result = seed_demo_data(db)
+            print(result)
+    elif args.command == "seed-demo-admin":
+        from app.db.seed import ensure_demo_admin
+        from app.db.session import SessionLocal
+
+        with SessionLocal() as db:
+            result = ensure_demo_admin(db)
+            db.commit()
+            print(result)
+    elif args.command == "seed-demo-data":
         from app.db.seed import seed_demo_data
         from app.db.session import SessionLocal
 
