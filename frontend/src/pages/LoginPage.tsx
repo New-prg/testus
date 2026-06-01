@@ -39,15 +39,15 @@ export function LoginPage() {
     <main className="grid min-h-screen place-items-center px-4 py-10">
       <section className="grid w-full max-w-6xl gap-8 lg:grid-cols-2 lg:items-center">
         <div className="animate-reveal">
-          <p className="section-label">Дипломный демо-MVP</p>
+          <p className="section-label">Демо-версия</p>
           <h1 className="mt-4 font-display text-5xl font-bold leading-tight text-cream sm:text-6xl">
-            Аналитика автопарка, которая ощущается как диспетчерский центр, а не таблица.
+            Вся аналитика автопарка в одном месте.
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-muted">
-            Следите за расходом топлива, простоем, риском превышения скорости и рейтингами автопарка через аналитический слой, не завязанный на внутренности GPS-провайдера.
+            Следите за расходом топлива, простоем, превышением скорости и рейтингом машин.
           </p>
           <div className="mt-8 grid gap-4 sm:grid-cols-3">
-            {['JWT-защита', 'Демо-данные загружены', 'API в основе'].map((item) => (
+            {['Вход защищён', 'Демо-данные готовы', 'Отчёты и метрики'].map((item) => (
               <div key={item} className="surface-card px-4 py-3 text-sm font-bold text-signal">
                 {item}
               </div>
@@ -56,9 +56,9 @@ export function LoginPage() {
         </div>
 
         <form className="surface-card animate-reveal p-6 sm:p-8" onSubmit={handleSubmit}>
-          <p className="section-label">Безопасный доступ</p>
+          <p className="section-label">Вход</p>
           <h2 className="mt-3 font-display text-3xl text-cream">Вход</h2>
-          <p className="mt-3 text-sm leading-6 text-muted">Используйте демо-администратора или зарегистрированную учётную запись.</p>
+          <p className="mt-3 text-sm leading-6 text-muted">Войдите под демо-аккаунтом или своим логином.</p>
 
           {error ? <div className="mt-5"><ErrorState title="Не удалось войти" message={error} /></div> : null}
 
@@ -80,7 +80,7 @@ export function LoginPage() {
           />
 
           <button className="primary-action mt-7 w-full" type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Входим...' : 'Открыть дашборд'}
+            {isSubmitting ? 'Входим...' : 'Войти'}
           </button>
 
           <p className="mt-6 text-center text-sm text-muted">

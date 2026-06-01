@@ -45,9 +45,9 @@ export function RegisterPage() {
   return (
     <main className="grid min-h-screen place-items-center px-4 py-10">
       <form className="surface-card w-full max-w-xl animate-reveal p-6 sm:p-8" onSubmit={handleSubmit}>
-        <p className="section-label">Создание доступа</p>
-        <h1 className="mt-3 font-display text-4xl text-cream">Регистрация аналитика</h1>
-        <p className="mt-3 text-sm leading-6 text-muted">Регистрация создаёт пользователя в бекэнде и сразу выполняет вход по JWT.</p>
+        <p className="section-label">Регистрация</p>
+        <h1 className="mt-3 font-display text-4xl text-cream">Создать аккаунт</h1>
+        <p className="mt-3 text-sm leading-6 text-muted">После регистрации вы сразу войдёте в систему.</p>
 
         {error ? <div className="mt-5"><ErrorState title="Не удалось зарегистрироваться" message={error} /></div> : null}
 
@@ -67,7 +67,7 @@ export function RegisterPage() {
         <input id="serverAddress" className="control-field mt-2" value={serverAddress} onChange={(event) => setServerAddress(event.target.value)} required />
 
         <label className="mt-5 block text-sm font-semibold text-cream" htmlFor="pilotNode">
-          Нода
+          Узел Pilot-GPS
         </label>
         <input id="pilotNode" className="control-field mt-2" type="number" min={1} value={node} onChange={(event) => setNode(event.target.value)} required />
 
@@ -85,7 +85,7 @@ export function RegisterPage() {
         />
 
         <button className="primary-action mt-7 w-full" type="submit" disabled={isSubmitting}>
-          {isSubmitting ? 'Создаём учётную запись...' : 'Создать учётную запись'}
+          {isSubmitting ? 'Создаём аккаунт...' : 'Создать аккаунт'}
         </button>
 
         <p className="mt-6 text-center text-sm text-muted">

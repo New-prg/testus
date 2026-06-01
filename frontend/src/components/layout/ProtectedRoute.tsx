@@ -8,7 +8,7 @@ export function ProtectedRoute() {
   const location = useLocation();
 
   if (isBootstrapping) {
-    return <LoadingState message="Проверяем защищённую сессию..." />;
+    return <LoadingState message="Проверяем авторизацию..." />;
   }
 
   if (!isAuthenticated) {
