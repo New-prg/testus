@@ -50,7 +50,7 @@ export function AppShell() {
           </nav>
 
           <div className="flex items-center gap-3 text-sm text-muted">
-            <span className="hidden sm:inline">{user?.full_name ?? user?.email}</span>
+            <span className="hidden sm:inline">{user?.full_name ?? user?.login}</span>
             <button className="secondary-action" type="button" onClick={handleLogout}>
               Выйти
             </button>

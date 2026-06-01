@@ -98,6 +98,13 @@ export function RouteDataProvider({ children }: { children: React.ReactNode }) {
       getProblemVehicles(period),
     ])
       .then(([summary, timeseries, comparison, problemVehicles]) => {
+        if (!timeseries.length && !comparison.length && (summary.vehicles_count ?? 0) === 0) {
+          setDashboardCache((current) => ({
+            ...current,
+            [period]: { data: null, error: null, isLoading: false, loadedAt: null },
+          }));
+          return null;
+        }
         const data = { summary, timeseries, comparison, problemVehicles };
         setDashboardCache((current) => ({
           ...current,
@@ -139,6 +146,10 @@ export function RouteDataProvider({ children }: { children: React.ReactNode }) {
 
     const request = getVehicles()
       .then((data) => {
+        if (!data.length) {
+          setVehiclesState({ data: null, error: null, isLoading: false, loadedAt: null });
+          return [];
+        }
         setVehiclesState({ data, error: null, isLoading: false, loadedAt: Date.now() });
         return data;
       })
