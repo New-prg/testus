@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime, timedelta
+from ipaddress import ip_address
 from random import Random
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -11,6 +13,48 @@ from app.config.rating_profile import CAR_TYPE_KAMAZ, CAR_TYPE_NOT_KAMAZ
 from app.core.config import Settings, get_settings
 from app.services.pilot_gps.normalization import extract_status_items, extract_vehicle_list, first_not_empty
 from app.services.telemetry.provider import TelemetryProvider
+
+
+def validate_pilot_server_address(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme != "https":
+        raise ValueError("Pilot-GPS server must use HTTPS")
+    if parsed.username or parsed.password:
+        raise ValueError("Pilot-GPS server must not include embedded credentials")
+    if parsed.params or parsed.query or parsed.fragment:
+        raise ValueError("Pilot-GPS server must not include params, query, or fragment")
+    if parsed.path not in ("", "/"):
+        raise ValueError("Pilot-GPS server must point to the host root only")
+    if not parsed.hostname:
+        raise ValueError("Pilot-GPS server host is required")
+
+    hostname = parsed.hostname.strip().lower()
+    if hostname in {"localhost", "localhost.localdomain"}:
+        raise ValueError("Pilot-GPS server host is not allowed")
+
+    try:
+        candidate = ip_address(hostname)
+    except ValueError:
+        candidate = None
+
+    if candidate and (
+        candidate.is_private
+        or candidate.is_loopback
+        or candidate.is_link_local
+        or candidate.is_multicast
+        or candidate.is_reserved
+        or candidate.is_unspecified
+    ):
+        raise ValueError("Pilot-GPS server host is not allowed")
+
+    return f"https://{hostname}" if parsed.port is None else f"https://{hostname}:{parsed.port}"
+
+
+def redact_sensitive_error(message: str) -> str:
+    lowered = message.lower()
+    if any(token in lowered for token in ("authorization", "password", "token", "basic ", "bearer ")):
+        return "Pilot-GPS request failed"
+    return message
 
 
 class PilotGpsClient(TelemetryProvider, ABC):
@@ -163,11 +207,23 @@ class DemoPilotGpsClient(PilotGpsClient):
 
 
 class HttpPilotGpsClient(PilotGpsClient):
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        base_url: str | None = None,
+        node: int | None = None,
+        username: str | None = None,
+        password: str | None = None,
+    ) -> None:
         self.settings = settings or get_settings()
+        self.base_url = validate_pilot_server_address(base_url or self.settings.pilot_gps_base_url).rstrip("/")
+        self.node = node if node is not None else self.settings.pilot_gps_node
+        self.username = username if username is not None else self.settings.pilot_gps_username
+        self.password = password if password is not None else self.settings.pilot_gps_password
 
     def list_vehicles(self) -> list[dict[str, Any]]:
-        payload = self._get_json(self.settings.pilot_gps_base_url.rstrip("/") + "/api/api.php", {"cmd": "list", "node": self.settings.pilot_gps_node})
+        payload = self._get_json(self.base_url + "/api/api.php", {"cmd": "list", "node": self.node})
         return extract_vehicle_list(payload)
 
     def list_sensors(self, pilot_agent_id: str) -> list[dict[str, Any]]:
@@ -181,8 +237,8 @@ class HttpPilotGpsClient(PilotGpsClient):
         if not agent_ids:
             return {}
         payload = self._get_json(
-            self.settings.pilot_gps_base_url.rstrip("/") + "/api/api.php",
-            {"cmd": "status", "node": self.settings.pilot_gps_node, "agents": ",".join(agent_ids)},
+            self.base_url + "/api/api.php",
+            {"cmd": "status", "node": self.node, "agents": ",".join(agent_ids)},
         )
         rows = extract_status_items(payload)
         status_by_agent: dict[str, dict[str, Any]] = {}
@@ -196,8 +252,8 @@ class HttpPilotGpsClient(PilotGpsClient):
 
     def _get_json(self, url: str, params: dict[str, Any] | None = None, retries: int = 5, sleep_base: float = 1.5) -> Any:
         auth = (
-            (self.settings.pilot_gps_username, self.settings.pilot_gps_password)
-            if self.settings.pilot_gps_username and self.settings.pilot_gps_password
+            (self.username, self.password)
+            if self.username and self.password
             else None
         )
         last_error: Exception | None = None
@@ -215,7 +271,7 @@ class HttpPilotGpsClient(PilotGpsClient):
                 if attempt == retries - 1:
                     raise
                 time.sleep(sleep_base * (2**attempt))
-        raise RuntimeError(f"Pilot-GPS request failed: {last_error}")
+        raise RuntimeError(redact_sensitive_error(f"Pilot-GPS request failed: {last_error}"))
 
 
 def get_pilot_client(settings: Settings | None = None) -> PilotGpsClient:

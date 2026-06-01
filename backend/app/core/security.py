@@ -1,8 +1,10 @@
+import base64
 from datetime import UTC, datetime, timedelta
 import hashlib
 from typing import Any
 
 import bcrypt
+from cryptography.fernet import Fernet
 import jwt
 
 from app.core.config import get_settings
@@ -18,6 +20,20 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, password_hash: str) -> bool:
     return bcrypt.checkpw(_password_bytes(password), password_hash.encode("ascii"))
+
+
+def _fernet() -> Fernet:
+    settings = get_settings()
+    seed = hashlib.sha256(settings.pilot_credentials_key.encode("utf-8")).digest()
+    return Fernet(base64.urlsafe_b64encode(seed))
+
+
+def encrypt_secret(value: str) -> str:
+    return _fernet().encrypt(value.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_secret(value: str) -> str:
+    return _fernet().decrypt(value.encode("utf-8")).decode("utf-8")
 
 
 def create_access_token(subject: str, expires_delta: timedelta | None = None) -> str:
