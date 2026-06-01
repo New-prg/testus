@@ -8,12 +8,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import insert, select
 from sqlalchemy.orm import Session
 
 from app.config.analytics_sensors import ANALYTICS_SENSORS, resolve_analytics_key
 from app.config.rating_profile import CAR_TYPE_UNKNOWN
-from app.db.models import AnalyticsSensorLink, SensorReading, Vehicle, VehicleSensor
+from app.db.models import AnalyticsSensorLink, SensorReading, User, Vehicle, VehicleSensor, new_uuid
 from app.services.telemetry.provider import TelemetryProvider
 from app.services.pilot_gps.normalization import first_not_empty, normalize_sensor
 from app.services.ratings.metric_calculator import MetricCalculator
@@ -43,6 +43,24 @@ class DatasetImportResult:
 
 
 DatasetProvider = TelemetryProvider
+
+
+@dataclass
+class _DatasetImportCaches:
+    vehicles_by_external_id: dict[str, Vehicle]
+    vehicles_by_imei: dict[str, Vehicle]
+    sensors_by_key: dict[tuple[str, str], VehicleSensor]
+    links_by_key: dict[tuple[str, str], AnalyticsSensorLink]
+
+
+@dataclass(frozen=True)
+class _QueuedReading:
+    vehicle_id: str
+    sensor_id: str
+    timestamp: datetime
+    value: float | None
+    speed: float | None
+    raw_json: Any
 
 
 class LocalDatasetProvider(TelemetryProvider):
@@ -112,19 +130,24 @@ class LocalDatasetProvider(TelemetryProvider):
 
 
 class DatasetImporter:
-    def import_path(self, db: Session, path: str | Path) -> dict[str, int]:
-        result = self.import_provider(db, LocalDatasetProvider(path))
+    READING_BATCH_SIZE = 10_000
+    EXISTING_READING_LOOKUP_CHUNK_SIZE = 500
+
+    def import_path(self, db: Session, path: str | Path, owner: User) -> dict[str, int]:
+        result = self.import_provider(db, LocalDatasetProvider(path), owner)
         return result.as_dict()
 
-    def import_provider(self, db: Session, provider: DatasetProvider) -> DatasetImportResult:
+    def import_provider(self, db: Session, provider: DatasetProvider, owner: User) -> DatasetImportResult:
+        caches = self._build_caches(db, owner)
         imported_vehicle_ids: set[str] = set()
         created_sensors = 0
         inserted_readings = 0
         skipped_rows = 0
         min_timestamp: datetime | None = None
         max_timestamp: datetime | None = None
-        flush_interval = 5_000
         processed_rows = 0
+        queued_readings: list[_QueuedReading] = []
+        has_pending_entities = False
 
         for raw_row in provider.iter_rows():
             processed_rows += 1
@@ -139,18 +162,31 @@ class DatasetImporter:
                 if normalized is None:
                     skipped_rows += 1
                     continue
-                vehicle = self._upsert_vehicle(db, normalized)
-                sensor, created = self._upsert_sensor(db, vehicle, normalized)
+                vehicle, vehicle_created = self._upsert_vehicle(db, owner, normalized, caches)
+                sensor, created, sensor_pending = self._upsert_sensor(db, vehicle, normalized, caches)
                 created_sensors += int(created)
-                if self._insert_reading(db, vehicle, sensor, normalized):
-                    inserted_readings += 1
-                    if inserted_readings % flush_interval == 0:
-                        db.flush()
-                        db.expunge_all()
+                has_pending_entities = has_pending_entities or vehicle_created or sensor_pending
+                queued_readings.append(
+                    _QueuedReading(
+                        vehicle_id=vehicle.id,
+                        sensor_id=sensor.id,
+                        timestamp=normalized["timestamp"],
+                        value=normalized["value"],
+                        speed=normalized.get("speed"),
+                        raw_json=normalized["raw_json"],
+                    )
+                )
+                if len(queued_readings) >= self.READING_BATCH_SIZE:
+                    inserted_readings += self._flush_reading_batch(db, queued_readings, has_pending_entities)
+                    queued_readings.clear()
+                    has_pending_entities = False
                 imported_vehicle_ids.add(vehicle.id)
                 timestamp = normalized["timestamp"]
                 min_timestamp = timestamp if min_timestamp is None else min(min_timestamp, timestamp)
                 max_timestamp = timestamp if max_timestamp is None else max(max_timestamp, timestamp)
+
+        if queued_readings:
+            inserted_readings += self._flush_reading_batch(db, queued_readings, has_pending_entities)
 
         db.flush()
         metric_windows = self._derive_metrics_and_ratings(db, imported_vehicle_ids, min_timestamp, max_timestamp)
@@ -213,13 +249,17 @@ class DatasetImporter:
             "raw_json": self._json_safe(row),
         }
 
-    def _upsert_vehicle(self, db: Session, row: dict[str, Any]) -> Vehicle:
+    def _upsert_vehicle(self, db: Session, owner: User, row: dict[str, Any], caches: _DatasetImportCaches) -> tuple[Vehicle, bool]:
         external_id = row["pilot_agent_id"]
-        vehicle = db.scalar(select(Vehicle).where(Vehicle.pilot_agent_id == external_id))
-        if vehicle is None and row.get("imei"):
-            vehicle = db.scalar(select(Vehicle).where(Vehicle.imei == row["imei"]))
+        imei = str(row["imei"]) if row.get("imei") else None
+        vehicle = caches.vehicles_by_external_id.get(external_id)
+        if vehicle is None and imei:
+            vehicle = caches.vehicles_by_imei.get(imei)
+        created = False
         if vehicle is None:
             vehicle = Vehicle(
+                id=new_uuid(),
+                user_id=owner.id,
                 pilot_agent_id=external_id,
                 imei=row.get("imei"),
                 plate_number=row.get("plate_number"),
@@ -231,7 +271,10 @@ class DatasetImporter:
                 raw_json={"provider": "local_dataset"},
             )
             db.add(vehicle)
-            db.flush()
+            caches.vehicles_by_external_id[external_id] = vehicle
+            if imei:
+                caches.vehicles_by_imei[imei] = vehicle
+            created = True
         else:
             vehicle.name = row["name"] or vehicle.name
             vehicle.plate_number = row.get("plate_number") or vehicle.plate_number
@@ -239,15 +282,21 @@ class DatasetImporter:
             vehicle.vin = row.get("vin") or vehicle.vin
             vehicle.vehicle_type = row.get("vehicle_type") or vehicle.vehicle_type
             vehicle.car_type = row.get("car_type") or vehicle.car_type
-        return vehicle
+            caches.vehicles_by_external_id.setdefault(external_id, vehicle)
+            if imei:
+                caches.vehicles_by_imei[imei] = vehicle
+        return vehicle, created
 
-    def _upsert_sensor(self, db: Session, vehicle: Vehicle, row: dict[str, Any]) -> tuple[VehicleSensor, bool]:
+    def _upsert_sensor(self, db: Session, vehicle: Vehicle, row: dict[str, Any], caches: _DatasetImportCaches) -> tuple[VehicleSensor, bool, bool]:
         normalized_sensor = normalize_sensor({"id": row["sensor_id"], "name": row["sensor_name"], "type": row.get("analytics_key"), "raw_value": row["value"]})
         external_id = normalized_sensor["tag_id"] if normalized_sensor else row["sensor_id"]
-        sensor = db.scalar(select(VehicleSensor).where(VehicleSensor.vehicle_id == vehicle.id, VehicleSensor.pilot_sensor_id == external_id))
+        sensor_key = (vehicle.id, external_id)
+        sensor = caches.sensors_by_key.get(sensor_key)
         created = False
+        pending = False
         if sensor is None:
             sensor = VehicleSensor(
+                id=new_uuid(),
                 vehicle_id=vehicle.id,
                 pilot_sensor_id=external_id,
                 name=row["sensor_name"],
@@ -257,33 +306,103 @@ class DatasetImporter:
                 raw_json={"provider": "local_dataset", "analytics_key": row.get("analytics_key")},
             )
             db.add(sensor)
-            db.flush()
+            caches.sensors_by_key[sensor_key] = sensor
             created = True
+            pending = True
         if row.get("analytics_key"):
-            existing_link = db.scalar(select(AnalyticsSensorLink).where(AnalyticsSensorLink.vehicle_id == vehicle.id, AnalyticsSensorLink.analytics_key == row["analytics_key"]))
+            analytics_key = str(row["analytics_key"])
+            link_key = (vehicle.id, analytics_key)
+            existing_link = caches.links_by_key.get(link_key)
             if existing_link is None:
-                spec = ANALYTICS_SENSORS[row["analytics_key"]]
-                db.add(AnalyticsSensorLink(vehicle_id=vehicle.id, sensor_id=sensor.id, analytics_key=row["analytics_key"], is_required=spec["required"], is_active=True))
-                db.flush()
+                spec = ANALYTICS_SENSORS[analytics_key]
+                existing_link = AnalyticsSensorLink(
+                    id=new_uuid(),
+                    vehicle_id=vehicle.id,
+                    sensor_id=sensor.id,
+                    analytics_key=analytics_key,
+                    is_required=spec["required"],
+                    is_active=True,
+                )
+                db.add(existing_link)
+                caches.links_by_key[link_key] = existing_link
                 created = True
+                pending = True
             elif existing_link.sensor_id != sensor.id:
                 existing_link.sensor_id = sensor.id
                 existing_link.is_active = True
-                db.flush()
-        return sensor, created
+        return sensor, created, pending
 
-    def _insert_reading(self, db: Session, vehicle: Vehicle, sensor: VehicleSensor, row: dict[str, Any]) -> bool:
-        exists = db.scalar(
-            select(SensorReading.id)
-            .where(SensorReading.vehicle_id == vehicle.id)
-            .where(SensorReading.sensor_id == sensor.id)
-            .where(SensorReading.timestamp == row["timestamp"])
-            .limit(1)
+    def _flush_reading_batch(self, db: Session, queued_readings: list[_QueuedReading], has_pending_entities: bool) -> int:
+        if not queued_readings:
+            return 0
+        if has_pending_entities:
+            db.flush()
+
+        deduped_rows: dict[tuple[str, str, datetime], _QueuedReading] = {}
+        for reading in queued_readings:
+            deduped_rows.setdefault(self._reading_key(reading.vehicle_id, reading.sensor_id, reading.timestamp), reading)
+
+        if not deduped_rows:
+            return 0
+
+        existing_keys = self._load_existing_reading_keys(db, list(deduped_rows.keys()))
+        insert_rows = [
+            {
+                "id": new_uuid(),
+                "vehicle_id": reading.vehicle_id,
+                "sensor_id": reading.sensor_id,
+                "timestamp": reading.timestamp,
+                "value": reading.value,
+                "speed": reading.speed,
+                "raw_json": reading.raw_json,
+            }
+            for key, reading in deduped_rows.items()
+            if key not in existing_keys
+        ]
+        if not insert_rows:
+            return 0
+
+        db.execute(insert(SensorReading), insert_rows)
+        return len(insert_rows)
+
+    def _load_existing_reading_keys(self, db: Session, keys: list[tuple[str, str, datetime]]) -> set[tuple[str, str, datetime]]:
+        existing_keys: set[tuple[str, str, datetime]] = set()
+        dialect_name = db.get_bind().dialect.name
+        timestamps_by_sensor: dict[str, set[datetime]] = {}
+        for _, sensor_id, timestamp in keys:
+            timestamps_by_sensor.setdefault(sensor_id, set()).add(timestamp)
+
+        for sensor_id, timestamps in timestamps_by_sensor.items():
+            ordered_timestamps = sorted(timestamps)
+            for offset in range(0, len(ordered_timestamps), self.EXISTING_READING_LOOKUP_CHUNK_SIZE):
+                chunk = ordered_timestamps[offset : offset + self.EXISTING_READING_LOOKUP_CHUNK_SIZE]
+                comparable_chunk = [timestamp.replace(tzinfo=None) for timestamp in chunk] if dialect_name == "sqlite" else chunk
+                rows = db.execute(
+                    select(SensorReading.vehicle_id, SensorReading.sensor_id, SensorReading.timestamp)
+                    .where(SensorReading.sensor_id == sensor_id)
+                    .where(SensorReading.timestamp.in_(comparable_chunk))
+                ).all()
+                existing_keys.update(
+                    self._reading_key(vehicle_id, existing_sensor_id, timestamp)
+                    for vehicle_id, existing_sensor_id, timestamp in rows
+                )
+        return existing_keys
+
+    @staticmethod
+    def _reading_key(vehicle_id: str, sensor_id: str, timestamp: datetime) -> tuple[str, str, datetime]:
+        normalized_timestamp = timestamp.astimezone(UTC).replace(tzinfo=None) if timestamp.tzinfo else timestamp
+        return vehicle_id, sensor_id, normalized_timestamp
+
+    def _build_caches(self, db: Session, owner: User) -> _DatasetImportCaches:
+        vehicles = db.scalars(select(Vehicle).where(Vehicle.user_id == owner.id)).all()
+        sensors = db.scalars(select(VehicleSensor).join(Vehicle, Vehicle.id == VehicleSensor.vehicle_id).where(Vehicle.user_id == owner.id)).all()
+        links = db.scalars(select(AnalyticsSensorLink).join(Vehicle, Vehicle.id == AnalyticsSensorLink.vehicle_id).where(Vehicle.user_id == owner.id)).all()
+        return _DatasetImportCaches(
+            vehicles_by_external_id={vehicle.pilot_agent_id: vehicle for vehicle in vehicles if vehicle.pilot_agent_id},
+            vehicles_by_imei={vehicle.imei: vehicle for vehicle in vehicles if vehicle.imei},
+            sensors_by_key={(sensor.vehicle_id, sensor.pilot_sensor_id): sensor for sensor in sensors if sensor.pilot_sensor_id},
+            links_by_key={(link.vehicle_id, link.analytics_key): link for link in links},
         )
-        if exists:
-            return False
-        db.add(SensorReading(vehicle_id=vehicle.id, sensor_id=sensor.id, timestamp=row["timestamp"], value=row["value"], speed=row.get("speed"), raw_json=row["raw_json"]))
-        return True
 
     def _derive_metrics_and_ratings(self, db: Session, vehicle_ids: set[str], min_timestamp: datetime | None, max_timestamp: datetime | None) -> int:
         if not vehicle_ids or min_timestamp is None or max_timestamp is None:

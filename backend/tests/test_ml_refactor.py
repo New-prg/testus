@@ -1,4 +1,4 @@
-from collections.abc import Generator
+from collections.abc import Generator, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -12,14 +12,16 @@ from sqlalchemy.pool import StaticPool
 
 from app.api import deps
 from app.core.config import get_settings
-from app.db.models import MLModelRun, MLResult, User, Vehicle, VehicleMetricWindow, VehicleRatingWindow
-from app.db.seed import seed_demo_data
+from app.db.models import AnalyticsSensorLink, MLModelRun, MLResult, SensorReading, User, Vehicle, VehicleMetricWindow, VehicleRatingWindow, VehicleSensor
+from app.db.seed import DemoDayLimitedProvider, seed_demo_data
 from app.db.session import Base, get_db
 from app.main import app
 from app.services.ml.anomaly_service import AnomalyService
 from app.services.ml.clustering_service import ClusteringService
 from app.services.ml.dataset_builder import FeatureBuilder
 from app.services.ml.forecasting_service import ForecastingService
+from app.services.pilot_gps.client import validate_pilot_server_address
+from app.services.pilot_gps.sync_service import PilotSyncService
 from app.services.ml.preprocessing import preprocess_feature_rows
 from app.services.telemetry.dataset_importer import DatasetImporter, DatasetProvider, LocalDatasetProvider
 
@@ -37,11 +39,21 @@ def build_static_session() -> tuple[Session, sessionmaker[Session]]:
     return factory(), factory
 
 
-def seed_ml_windows(db: Session, vehicle_count: int = 6, days: int = 4) -> list[Vehicle]:
+def build_no_autoflush_session() -> Session:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)()
+
+
+def make_user(login: str, role: str = "admin") -> User:
+    return User(email=login, login=login, password_hash="hash", full_name=login, role=role)
+
+
+def seed_ml_windows(db: Session, owner: User, vehicle_count: int = 6, days: int = 4) -> list[Vehicle]:
     start = datetime(2026, 1, 1, tzinfo=UTC)
     vehicles: list[Vehicle] = []
     for vehicle_index in range(vehicle_count):
-        vehicle = Vehicle(name=f"Vehicle {vehicle_index}", pilot_agent_id=f"demo-agent-{vehicle_index:03d}", car_type="UNKNOWN")
+        vehicle = Vehicle(user_id=owner.id, name=f"Vehicle {vehicle_index}", pilot_agent_id=f"demo-agent-{vehicle_index:03d}", car_type="UNKNOWN")
         db.add(vehicle)
         db.flush()
         vehicles.append(vehicle)
@@ -100,9 +112,12 @@ def seed_ml_windows(db: Session, vehicle_count: int = 6, days: int = 4) -> list[
 
 def test_feature_builder_excludes_final_rating_from_unsupervised_features() -> None:
     db = build_session()
-    seed_ml_windows(db, vehicle_count=1, days=1)
+    owner = User(email="owner@example.com", login="owner@example.com", password_hash="hash", full_name="Owner", role="admin")
+    db.add(owner)
+    db.commit()
+    seed_ml_windows(db, owner, vehicle_count=1, days=1)
 
-    row = FeatureBuilder().build(db, limit=10)[0]
+    row = FeatureBuilder().build(db, limit=10, user_id=owner.id)[0]
 
     assert "final_rating" not in row["features"]
     assert not any(feature.endswith("_score") for feature in row["features"])
@@ -136,8 +151,11 @@ def test_preprocessing_imputes_missing_values_without_nan() -> None:
 
 def test_anomaly_service_returns_explanations_for_detected_anomalies() -> None:
     db = build_session()
-    seed_ml_windows(db)
-    rows = FeatureBuilder().build(db, limit=100)
+    owner = make_user("anomaly@example.com")
+    db.add(owner)
+    db.commit()
+    seed_ml_windows(db, owner)
+    rows = FeatureBuilder().build(db, limit=100, user_id=owner.id)
 
     result = AnomalyService().detect(rows)
     anomalies = [row for row in result["results"] if row["label"] == "anomaly"]
@@ -161,8 +179,11 @@ def test_anomaly_service_returns_explanations_for_detected_anomalies() -> None:
 
 def test_clustering_service_returns_labels_and_metrics() -> None:
     db = build_session()
-    seed_ml_windows(db)
-    rows = FeatureBuilder().build(db, limit=100)
+    owner = make_user("cluster@example.com")
+    db.add(owner)
+    db.commit()
+    seed_ml_windows(db, owner)
+    rows = FeatureBuilder().build(db, limit=100, user_id=owner.id)
 
     result = ClusteringService().cluster(rows)
 
@@ -182,8 +203,11 @@ def test_clustering_service_returns_labels_and_metrics() -> None:
 
 def test_forecasting_service_returns_model_metrics() -> None:
     db = build_session()
-    seed_ml_windows(db)
-    rows = FeatureBuilder().build(db, limit=100)
+    owner = make_user("forecast@example.com")
+    db.add(owner)
+    db.commit()
+    seed_ml_windows(db, owner)
+    rows = FeatureBuilder().build(db, limit=100, user_id=owner.id)
 
     result = ForecastingService().forecast(rows)
 
@@ -201,8 +225,11 @@ def test_forecasting_service_returns_model_metrics() -> None:
 
 def test_forecasting_service_skips_when_holdout_is_not_possible() -> None:
     db = build_session()
-    seed_ml_windows(db, vehicle_count=3, days=1)
-    rows = FeatureBuilder().build(db, limit=100)
+    owner = make_user("holdout@example.com")
+    db.add(owner)
+    db.commit()
+    seed_ml_windows(db, owner, vehicle_count=3, days=1)
+    rows = FeatureBuilder().build(db, limit=100, user_id=owner.id)
 
     result = ForecastingService().forecast(rows)
 
@@ -215,6 +242,9 @@ def test_forecasting_service_skips_when_holdout_is_not_possible() -> None:
 def test_dataset_importer_supports_repeated_rows_for_same_sensor() -> None:
     db = build_session()
     importer = DatasetImporter()
+    owner = make_user("dataset-repeat@example.com")
+    db.add(owner)
+    db.commit()
 
     result = importer.import_provider(
         db,
@@ -240,10 +270,88 @@ def test_dataset_importer_supports_repeated_rows_for_same_sensor() -> None:
                 },
             ]
         ),
+        owner,
     )
 
     assert result.readings == 2
     assert result.sensors >= 1
+
+
+def test_dataset_importer_deduplicates_same_timestamp_rows_without_autoflush() -> None:
+    db = build_no_autoflush_session()
+    importer = DatasetImporter()
+    owner = make_user("dataset-dedupe@example.com")
+    db.add(owner)
+    db.commit()
+
+    result = importer.import_provider(
+        db,
+        _InMemoryDatasetProvider(
+            [
+                {
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "value": 100.0,
+                    "sensor_name": "Полный пробег (CAN)",
+                    "sensor_id": "distance-1",
+                    "analytics_key": "distance",
+                    "vehicle_id": "veh-1",
+                    "name": "Vehicle 1",
+                },
+                {
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "value": 100.0,
+                    "sensor_name": "Полный пробег (CAN)",
+                    "sensor_id": "distance-1",
+                    "analytics_key": "distance",
+                    "vehicle_id": "veh-1",
+                    "name": "Vehicle 1",
+                },
+            ]
+        ),
+        owner,
+    )
+
+    assert result.readings == 1
+    assert db.query(SensorReading).count() == 1
+    assert result.skipped_rows == 0
+
+
+def test_dataset_importer_skips_existing_readings_on_reimport() -> None:
+    db = build_no_autoflush_session()
+    importer = DatasetImporter()
+    owner = make_user("dataset-reimport@example.com")
+    db.add(owner)
+    db.commit()
+    rows = [
+        {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "value": 100.0,
+            "sensor_name": "Полный пробег (CAN)",
+            "sensor_id": "distance-1",
+            "analytics_key": "distance",
+            "vehicle_id": "veh-1",
+            "name": "Vehicle 1",
+        },
+        {
+            "timestamp": "2026-01-01T01:00:00Z",
+            "value": 125.0,
+            "sensor_name": "Полный пробег (CAN)",
+            "sensor_id": "distance-1",
+            "analytics_key": "distance",
+            "vehicle_id": "veh-1",
+            "name": "Vehicle 1",
+        },
+    ]
+
+    first_result = importer.import_provider(db, _InMemoryDatasetProvider(rows), owner)
+    second_result = importer.import_provider(db, _InMemoryDatasetProvider(rows), owner)
+
+    assert first_result.readings == 2
+    assert second_result.readings == 0
+    assert db.query(SensorReading).count() == 2
+    assert db.query(Vehicle).count() == 1
+    assert db.query(VehicleSensor).count() == 1
+    assert db.query(AnalyticsSensorLink).count() == 1
 
 
 def test_local_dataset_provider_streams_rows_with_limit(tmp_path: Path) -> None:
@@ -264,6 +372,9 @@ def test_local_dataset_provider_streams_rows_with_limit(tmp_path: Path) -> None:
 def test_dataset_importer_accepts_reduced_telematics_schema() -> None:
     db = build_session()
     importer = DatasetImporter()
+    owner = make_user("dataset-schema@example.com")
+    db.add(owner)
+    db.commit()
 
     result = importer.import_provider(
         db,
@@ -284,6 +395,7 @@ def test_dataset_importer_accepts_reduced_telematics_schema() -> None:
                 }
             ]
         ),
+        owner,
     )
 
     vehicle = db.query(Vehicle).one()
@@ -325,9 +437,59 @@ def test_seed_demo_data_prefers_configured_dataset(monkeypatch, tmp_path: Path) 
     assert db.query(User).filter(User.email == "admin@example.com").one()
 
 
+def test_demo_day_limited_provider_keeps_all_vehicles_for_first_day_only() -> None:
+    provider = DemoDayLimitedProvider(
+        _InMemoryDatasetProvider(
+            [
+                {
+                    "vehicle_key": "veh-1",
+                    "vehicle_agentid": "veh-1",
+                    "timestamp": "2026-05-24T03:11:20+00:00",
+                    "canonical_feature": "speed",
+                    "value": 45.0,
+                    "local_sensor_id": "72427",
+                    "sensor_name": "Скорость (тахограф)",
+                    "name": "Vehicle 1",
+                },
+                {
+                    "vehicle_key": "veh-2",
+                    "vehicle_agentid": "veh-2",
+                    "timestamp": "2026-05-24T05:11:20+00:00",
+                    "canonical_feature": "speed",
+                    "value": 35.0,
+                    "local_sensor_id": "72428",
+                    "sensor_name": "Скорость (тахограф)",
+                    "name": "Vehicle 2",
+                },
+                {
+                    "vehicle_key": "veh-1",
+                    "vehicle_agentid": "veh-1",
+                    "timestamp": "2026-05-25T03:11:20+00:00",
+                    "canonical_feature": "speed",
+                    "value": 25.0,
+                    "local_sensor_id": "72427",
+                    "sensor_name": "Скорость (тахограф)",
+                    "name": "Vehicle 1",
+                },
+            ]
+        ),
+        max_days=1,
+    )
+
+    rows = list(provider.iter_rows())
+
+    assert len(rows) == 2
+    assert {row["vehicle_key"] for row in rows} == {"veh-1", "veh-2"}
+    assert all(str(row["timestamp"]).startswith("2026-05-24") for row in rows)
+
+
 def test_seed_demo_data_resets_existing_demo_statistics_for_dataset(monkeypatch, tmp_path: Path) -> None:
     db = build_session()
-    vehicle = Vehicle(name="Old demo", pilot_agent_id="old-demo", car_type="UNKNOWN")
+    demo_admin = make_user("admin@example.com")
+    demo_admin.is_demo = True
+    db.add(demo_admin)
+    db.commit()
+    vehicle = Vehicle(user_id=demo_admin.id, name="Old demo", pilot_agent_id="old-demo", car_type="UNKNOWN")
     db.add(vehicle)
     db.flush()
     db.add(MLResult(result_type="forecast", vehicle_id=vehicle.id, payload={"vehicle_id": vehicle.id}))
@@ -356,7 +518,7 @@ def test_seed_demo_data_resets_existing_demo_statistics_for_dataset(monkeypatch,
     assert db.query(MLModelRun).count() == 0
 
 
-def test_seed_demo_data_fails_fast_for_missing_configured_dataset(monkeypatch, tmp_path: Path) -> None:
+def test_seed_demo_data_falls_back_when_configured_dataset_is_missing(monkeypatch, tmp_path: Path) -> None:
     db = build_session()
     missing_dataset_path = tmp_path / "missing-demo.csv"
 
@@ -364,17 +526,62 @@ def test_seed_demo_data_fails_fast_for_missing_configured_dataset(monkeypatch, t
     get_settings.cache_clear()
 
     try:
-        with pytest.raises(ValueError, match="Configured demo dataset path does not exist"):
-            seed_demo_data(db)
+        result = seed_demo_data(db)
+    finally:
+        get_settings.cache_clear()
+
+    assert result["source"] == "demo_pilot_provider"
+    assert result["vehicles"]["synced"] == 12
+    assert result["readings"]["inserted"] > 0
+
+
+def test_demo_dataset_row_limit_defaults_to_unlimited(monkeypatch) -> None:
+    monkeypatch.delenv("DEMO_DATASET_ROW_LIMIT", raising=False)
+    get_settings.cache_clear()
+
+    try:
+        assert get_settings().demo_dataset_row_limit == -1
     finally:
         get_settings.cache_clear()
 
 
+def test_validate_pilot_server_address_rejects_private_or_non_https_hosts() -> None:
+    for value in (
+        "http://pilot-gps.example",
+        "https://localhost",
+        "https://127.0.0.1",
+        "https://192.168.1.10",
+        "https://pilot-gps.example/api",
+        "https://user:pass@pilot-gps.example",
+    ):
+        with pytest.raises(ValueError):
+            validate_pilot_server_address(value)
+
+    assert validate_pilot_server_address("https://pilot-gps.example") == "https://pilot-gps.example"
+
+
+def test_next_sync_uses_registration_anchor() -> None:
+    registered_at = datetime(2026, 1, 1, 10, 15, tzinfo=UTC)
+    completed_at = datetime(2026, 1, 1, 13, 10, tzinfo=UTC)
+    user = User(email="anchor@example.com", login="anchor@example.com", password_hash="hash", sync_started_at=registered_at)
+
+    next_sync = PilotSyncService._next_sync_from_anchor(user, completed_at)
+
+    assert next_sync == datetime(2026, 1, 1, 13, 15, tzinfo=UTC)
+
+
+def test_safe_sync_error_redacts_sensitive_tokens() -> None:
+    error = RuntimeError("Authorization failed for Bearer secret-token")
+
+    assert PilotSyncService._safe_sync_error(error) == "Pilot-GPS sync failed"
+
+
 def test_ml_model_comparison_endpoint_after_recalculate() -> None:
     db, factory = build_static_session()
-    [admin] = [User(email="admin@example.com", password_hash="hash", full_name="Admin", role="admin")]
+    [admin] = [make_user("admin@example.com")]
     db.add(admin)
-    seed_ml_windows(db)
+    db.commit()
+    seed_ml_windows(db, admin)
 
     def override_db() -> Generator[Session, None, None]:
         session = factory()
@@ -410,9 +617,10 @@ def test_ml_model_comparison_endpoint_after_recalculate() -> None:
 
 def test_ml_recalculate_persists_result_periods() -> None:
     db, factory = build_static_session()
-    admin = User(email="admin-periods@example.com", password_hash="hash", full_name="Admin", role="admin")
+    admin = make_user("admin-periods@example.com")
     db.add(admin)
-    seed_ml_windows(db)
+    db.commit()
+    seed_ml_windows(db, admin)
 
     def override_db() -> Generator[Session, None, None]:
         session = factory()
@@ -471,14 +679,15 @@ def test_alembic_upgrade_from_legacy_0002_revision_succeeds(tmp_path: Path, monk
     finally:
         get_settings.cache_clear()
 
-    assert current_revision == "0002_ml_model_runs"
+    assert current_revision == "0002_account_scoped_pilot_sync"
 
 
 def test_ml_recalculate_requires_admin_user() -> None:
     db, factory = build_static_session()
-    user = User(email="user@example.com", password_hash="hash", full_name="User", role="user")
+    user = make_user("user@example.com", role="user")
     db.add(user)
-    seed_ml_windows(db)
+    db.commit()
+    seed_ml_windows(db, user)
 
     def override_db() -> Generator[Session, None, None]:
         session = factory()
@@ -499,8 +708,8 @@ def test_ml_recalculate_requires_admin_user() -> None:
 
 
 class _InMemoryDatasetProvider(DatasetProvider):
-    def __init__(self, rows: list[dict[str, object]]) -> None:
-        self.rows = rows
+    def __init__(self, rows: Sequence[Mapping[str, object]]) -> None:
+        self.rows = [dict(row) for row in rows]
 
     def iter_rows(self) -> list[dict[str, object]]:
         return self.rows
