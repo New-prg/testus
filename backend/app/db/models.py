@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Index, Integer, JSON, String, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.config.rating_profile import CAR_TYPE_UNKNOWN
@@ -24,12 +24,23 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    login: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    pilot_password_encrypted: Mapped[str | None] = mapped_column(String(1024))
     full_name: Mapped[str | None] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(32), default="user", nullable=False)
+    pilot_server_address: Mapped[str | None] = mapped_column(String(512))
+    pilot_node: Mapped[int | None] = mapped_column(Integer)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sync_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sync_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sync_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_sync_error: Mapped[str | None] = mapped_column(String(1000))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     reports: Mapped[list[Report]] = relationship(back_populates="created_by")
+    vehicles: Mapped[list[Vehicle]] = relationship(back_populates="owner")
 
     @property
     def is_admin(self) -> bool:
@@ -42,9 +53,11 @@ class User(Base):
 
 class Vehicle(Base):
     __tablename__ = "vehicles"
+    __table_args__ = (UniqueConstraint("user_id", "pilot_agent_id", name="uq_vehicle_owner_agent"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
-    pilot_agent_id: Mapped[str | None] = mapped_column(String(128), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    pilot_agent_id: Mapped[str | None] = mapped_column(String(128), index=True)
     imei: Mapped[str | None] = mapped_column(String(64), index=True)
     plate_number: Mapped[str | None] = mapped_column(String(64), index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -56,6 +69,7 @@ class Vehicle(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
+    owner: Mapped[User] = relationship(back_populates="vehicles")
     sensors: Mapped[list[VehicleSensor]] = relationship(back_populates="vehicle", cascade="all, delete-orphan")
     analytics_links: Mapped[list[AnalyticsSensorLink]] = relationship(back_populates="vehicle", cascade="all, delete-orphan")
     readings: Mapped[list[SensorReading]] = relationship(back_populates="vehicle", cascade="all, delete-orphan")

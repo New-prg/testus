@@ -4,7 +4,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config.analytics_sensors import ANALYTICS_SENSORS
-from app.db.models import AnalyticsSensorLink, SensorReading, Vehicle, VehicleSensor
+from app.db.models import AnalyticsSensorLink, SensorReading, User, Vehicle, VehicleSensor
 from app.db.session import Base
 from app.services.ratings.metric_calculator import MetricCalculator
 
@@ -31,7 +31,10 @@ def add_reading(db: Session, vehicle: Vehicle, sensor: VehicleSensor, at: dateti
 
 def test_metric_calculator_respects_idle_grace_and_high_speed_braking() -> None:
     db = build_session()
-    vehicle = Vehicle(name="Test vehicle")
+    user = User(email="metrics@example.com", login="metrics@example.com", password_hash="hash", full_name="Metrics", role="admin")
+    db.add(user)
+    db.flush()
+    vehicle = Vehicle(user_id=user.id, name="Test vehicle")
     db.add(vehicle)
     db.flush()
     sensors = {key: ensure_sensor(db, vehicle, key) for key in ["distance", "fuel_consumption", "coasting", "optimal_rpm", "idle_time", "engine_work_time", "brake_pedal", "cruise_control", "overspeed", "speed"]}
