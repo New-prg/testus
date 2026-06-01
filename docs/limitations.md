@@ -2,8 +2,8 @@
 
 ### Data source limitations
 
-- Pilot-GPS is preserved as a provider boundary, but it is not the central object of research.
-- Publicly documented live historical semantics from Pilot-GPS remain limited, so local datasets and demo flows are still important for reproducible experiments.
+- Pilot-GPS is preserved as one provider boundary, but it is not the central object of research.
+- Publicly documented live historical semantics from Pilot-GPS remain limited, so local dataset import and demo flows remain the main reproducible path for diploma experiments.
 
 ### Dataset limitations
 
@@ -16,7 +16,7 @@
 - Rule-based `final_rating` is a baseline / weak label, not a learned truth.
 - Unsupervised anomaly and clustering outputs are sensitive to fleet composition and scaling choices.
 - Cluster profile names are interpretable heuristics, not strict semantic classes.
-- Forecasting currently targets a derived operational score rather than a fully independent business target.
+- Forecasting currently targets a derived operational score rather than a fully independent business target, even though evaluation is limited to holdout windows.
 
 ### Interpretation limitations
 

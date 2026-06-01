@@ -41,6 +41,15 @@ The importer also supports rows shaped like a `sensor_day_chunk` record:
 - `sensor` object
 - `sensor_data` list with timestamped points
 
+It also accepts the reduced long-form telematics layout used by the demo dataset, including fields such as:
+
+- `vehicle_key`
+- `vehicle_agentid`
+- `vehiclenumber`
+- `canonical_feature`
+- `local_sensor_id`
+- `speed_from_point`
+
 ### Import behavior
 
 - Vehicles are upserted into `Vehicle`.
@@ -51,3 +60,5 @@ The importer also supports rows shaped like a `sensor_day_chunk` record:
 ### Research note
 
 Pilot-GPS is only one possible source of telemetry. In the thesis framing, the central object of study is the ML analytics pipeline over telematics data, not the external provider itself.
+
+The default demo seed uses the reduced weekly dataset (`telematics_reduced_long.csv`) as the reproducible source of operational statistics, with `sensor_profile_canonical.json` kept beside it as the matching sensor profile sidecar.

@@ -21,6 +21,7 @@ Evaluation summary:
 Goal: discover behavioral segments inside the fleet without manual labels.
 
 - Main methods: `KMeans` and `AgglomerativeClustering`
+- Additional comparator: `quantile_baseline` as an explicit heuristic baseline rather than a peer sklearn model
 - Profiles are translated into Russian operational descriptions such as:
   - economical usage
   - high idle
@@ -41,12 +42,14 @@ Goal: estimate near-future behavior using recent historical windows.
 - ML model: `RandomForestRegressor`
 - UI presentation: one forecast row per vehicle/window with both baseline and model predictions
 - Current supervised target: `final_rating` as a weak target / baseline-aligned target
+- Evaluation split: train uses historical windows, while test uses the latest available window per vehicle
 
 Evaluation:
 
 - `MAE`
 - `RMSE`
 - `R2`
+- All forecasting metrics are calculated only on the time-based test portion, not on the training rows
 
 ### Preprocessing
 
@@ -57,4 +60,4 @@ All ML services apply preprocessing before model fitting:
 
 ### Important interpretation rule
 
-The ML component complements, but does not replace, operational analytics. Pilot-GPS is not the core scientific contribution; the contribution is the construction of an interpretable telematics ML pipeline.
+The ML component complements, but does not replace, operational analytics. `final_rating` is a rule-based weak label / baseline rather than an ML model, and unsupervised tasks do not use `final_rating` as a feature. Pilot-GPS is not the core scientific contribution; the contribution is the construction of an interpretable telematics ML pipeline.

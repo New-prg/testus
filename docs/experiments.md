@@ -14,7 +14,7 @@ The experiment cycle is available through:
 ### What is persisted
 
 - `MLModelRun` stores run metadata, model name, feature names, metrics, status, and creation time.
-- `MLResult` stores per-vehicle outputs for anomaly, cluster, and forecast views.
+- `MLResult` stores per-vehicle outputs for anomaly, cluster, and forecast views together with `period_start` and `period_end`.
 
 ### Practical demo scenario
 
@@ -31,7 +31,13 @@ The experiment cycle is available through:
 ### Experimental interpretation
 
 - Anomaly results show local deviations from fleet norms.
-- Cluster results provide behavior-oriented fleet segmentation.
-- Forecasting compares a simple operational baseline with a tree-based regressor.
+- Cluster results provide behavior-oriented fleet segmentation, while `quantile_baseline` remains an explicit heuristic comparator.
+- Forecasting compares a simple operational baseline with a tree-based regressor on identical holdout test windows.
+
+### Scope of the platform
+
+- `final_rating` is used as a weak label / operational baseline, not as a learned model.
+- Unsupervised experiments do not include `final_rating` in their feature space.
+- The platform demonstrates a compact thesis pipeline: ingestion → feature engineering → preprocessing → ML experiments → metrics → explanations → UI.
 
 This is intentionally a minimal platform for diploma demonstration rather than a production MLOps stack.

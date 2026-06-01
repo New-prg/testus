@@ -15,6 +15,8 @@ cp .env.example .env
 docker compose up --build
 ```
 
+The default demo startup mounts `../../dataset/pilot_sensor_dataset_2026-05-31_reduction` into the backend container and seeds statistics from `telematics_reduced_long.csv`. `sensor_profile_canonical.json` is kept as the profile sidecar for the same demo dataset.
+
 - Frontend: http://localhost:5173
 - Backend: http://localhost:8000
 - Swagger: http://localhost:8000/docs
@@ -47,6 +49,7 @@ docker compose exec backend alembic downgrade -1
 ## Pilot-GPS integration
 
 - Demo mode is enabled by default with `USE_DEMO_DATA=true`.
+- The default demo statistics source is the reduced weekly local dataset (`telematics_reduced_long.csv`), with fallback to the generated demo Pilot provider when that dataset is unavailable.
 - Live integration uses only official/publicly documented Pilot-GPS areas for vehicle listing and current sensor status; historical calibrated sensor import remains an extension point.
 - Raw external data is preserved in JSON fields.
 
@@ -95,6 +98,8 @@ docker compose exec backend python -m app.cli import-dataset --path /app/path/to
 ```
 
 Supported formats: CSV, JSON, JSONL. Imported rows are normalized into `Vehicle`, `VehicleSensor`, and `SensorReading`, then daily metrics and ratings are recalculated for the imported period.
+
+The built-in demo seed uses this same importer path, so manual dataset import and `seed-demo` stay aligned.
 
 ## Known limitations
 

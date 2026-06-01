@@ -5,9 +5,9 @@ This project is organized as a minimal ML platform for fleet telematics analytic
 Core pipeline:
 
 1. **Ingestion**
-   - `TelemetryProvider` defines the source boundary.
-   - Pilot-GPS remains one provider and is not the central object of research.
-   - `DatasetProvider` / local dataset import can load CSV, JSON, or JSONL into `Vehicle`, `VehicleSensor`, and `SensorReading`.
+   - `TelemetryProvider` defines the source boundary for both live providers and reproducible dataset imports.
+   - Pilot-GPS is only one possible provider and is not the central object of research.
+   - `LocalDatasetProvider` implements the same boundary for CSV, JSON, and JSONL imports into `Vehicle`, `VehicleSensor`, and `SensorReading`.
 
 2. **Operational analytics layer**
    - Raw readings are aggregated into `VehicleMetricWindow`.
@@ -26,12 +26,13 @@ Core pipeline:
 
 5. **ML experiments**
    - Anomaly detection: IsolationForest with a robust baseline comparator.
-   - Clustering: KMeans and AgglomerativeClustering with profile descriptions.
-   - Forecasting: moving-average baseline and RandomForestRegressor.
-   - Run metadata is persisted in `MLModelRun`; per-vehicle outputs remain in `MLResult`.
+   - Clustering: KMeans, AgglomerativeClustering, and an explicit quantile baseline with profile descriptions.
+   - Forecasting: moving-average baseline and RandomForestRegressor evaluated on the latest holdout windows.
+   - Run metadata is persisted in `MLModelRun`; per-vehicle outputs remain in `MLResult` with their source periods.
 
 6. **Presentation**
    - FastAPI exposes `/api/ml/*` endpoints.
    - React renders `/ml` as a thesis-oriented analytics screen with comparison, anomalies, clusters, forecasts, and explanations.
 
 The design goal is not to replace the existing dashboard, vehicle, or report modules, but to add a minimal and explicit ML pipeline on top of the existing telemetry analytics stack.
+The demonstrated pipeline is: ingestion → feature engineering → preprocessing → ML experiments → metrics → explanations → UI.
