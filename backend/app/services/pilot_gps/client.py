@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime, timedelta
 from ipaddress import ip_address
-from random import Random
 import time
 from typing import Any
 from urllib.parse import urlparse
@@ -77,133 +76,16 @@ class PilotGpsClient(TelemetryProvider, ABC):
 
 class DemoPilotGpsClient(PilotGpsClient):
     def list_vehicles(self) -> list[dict[str, Any]]:
-        vehicles: list[dict[str, Any]] = []
-        for index in range(1, 13):
-            car_type = CAR_TYPE_KAMAZ if index <= 4 else CAR_TYPE_NOT_KAMAZ
-            vehicles.append(
-                {
-                    "pilot_agent_id": f"demo-agent-{index:03d}",
-                    "imei": f"860000000000{index:03d}",
-                    "plate_number": f"DEMO-{index:03d}",
-                    "name": f"Demo vehicle {index:02d}",
-                    "vin": f"DEMO-VIN-{index:05d}",
-                    "vehicle_type": "truck" if car_type == CAR_TYPE_KAMAZ else "tractor",
-                    "car_type": car_type,
-                    "is_active": True,
-                    "raw_json": {"provider": "demo", "style": ["good", "average", "inefficient", "anomalous"][index % 4]},
-                }
-            )
-        return vehicles
+        raise RuntimeError("Generated demo Pilot-GPS data is disabled. Use the static demo dataset import instead.")
 
     def list_sensors(self, pilot_agent_id: str) -> list[dict[str, Any]]:
-        return [
-            {
-                "pilot_sensor_id": f"{pilot_agent_id}:{key}",
-                "name": spec["pilot_name"],
-                "fieldname": key,
-                "typeid": spec["kind"],
-                "measure_unit": spec["unit"],
-                "history_enabled": True,
-                "filter_enabled": False,
-                "formula": None,
-                "raw_json": {"source": "demo", "analytics_key": key},
-            }
-            for key, spec in ANALYTICS_SENSORS.items()
-        ]
+        raise RuntimeError("Generated demo Pilot-GPS data is disabled. Use the static demo dataset import instead.")
 
     def list_sensor_history(self, pilot_agent_id: str, days: int) -> dict[str, list[dict[str, Any]]]:
-        rng = Random(sum(ord(char) for char in pilot_agent_id))
-        start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days)
-        style = sum(ord(char) for char in pilot_agent_id) % 4
-        distance_counter = 0.0
-        fuel_counter = 0.0
-        history = {key: [] for key in ANALYTICS_SENSORS}
-        for day in range(days):
-            for sample in range(24):
-                timestamp = start + timedelta(days=day, hours=sample)
-                moving = 6 <= sample <= 20
-                speed = 0.0 if not moving else max(0.0, rng.gauss(60 if style != 3 else 75, 12))
-                if style == 0:
-                    fuel_rate = 0.24
-                    coasting = 0.34
-                    optimal_rpm = 0.64
-                    idle_seconds = 180
-                    cruise = 0.18
-                    overspeed = 0.02
-                    brakes = 2
-                elif style == 1:
-                    fuel_rate = 0.29
-                    coasting = 0.24
-                    optimal_rpm = 0.52
-                    idle_seconds = 420
-                    cruise = 0.12
-                    overspeed = 0.05
-                    brakes = 4
-                elif style == 2:
-                    fuel_rate = 0.34
-                    coasting = 0.16
-                    optimal_rpm = 0.42
-                    idle_seconds = 780
-                    cruise = 0.08
-                    overspeed = 0.09
-                    brakes = 6
-                else:
-                    fuel_rate = 0.41
-                    coasting = 0.1
-                    optimal_rpm = 0.32
-                    idle_seconds = 1200
-                    cruise = 0.03
-                    overspeed = 0.16
-                    brakes = 9
-                    if rng.random() < 0.25:
-                        speed += 25
-                distance_delta = 0.0 if not moving else speed * 0.7
-                fuel_delta = 0.0 if not moving else distance_delta * fuel_rate
-                distance_counter += distance_delta
-                fuel_counter += fuel_delta
-                brake_speed = speed if brakes > 0 else 0.0
-                rows = {
-                    "distance": distance_counter,
-                    "fuel_consumption": fuel_counter,
-                    "coasting": coasting,
-                    "optimal_rpm": optimal_rpm,
-                    "idle_time": float(idle_seconds),
-                    "engine_work_time": 3600.0 if moving else 0.0,
-                    "brake_pedal": float(brakes),
-                    "cruise_control": cruise,
-                    "overspeed": overspeed,
-                    "speed": speed,
-                }
-                for key, value in rows.items():
-                    history[key].append({
-                        "timestamp": timestamp,
-                        "value": round(float(value), 4),
-                        "speed": round(float(brake_speed), 4),
-                        "raw_json": {"provider": "demo", "analytics_key": key, "timestamp": timestamp.isoformat()},
-                    })
-        return history
+        raise RuntimeError("Generated demo Pilot-GPS data is disabled. Use the static demo dataset import instead.")
 
     def list_current_status(self, agent_ids: list[str]) -> dict[str, dict[str, Any]]:
-        status_map: dict[str, dict[str, Any]] = {}
-        for agent_id in agent_ids:
-            history = self.list_sensor_history(agent_id, 1)
-            sensors_status = []
-            for key, rows in history.items():
-                if not rows:
-                    continue
-                latest = rows[-1]
-                sensors_status.append(
-                    {
-                        "id": f"{agent_id}:{key}",
-                        "name": ANALYTICS_SENSORS[key]["pilot_name"],
-                        "raw_value": latest["value"],
-                        "dig_value": latest["value"],
-                        "change_ts": int(latest["timestamp"].timestamp()),
-                        "speed": latest["speed"],
-                    }
-                )
-            status_map[agent_id] = {"agentid": agent_id, "sensors_status": sensors_status}
-        return status_map
+        raise RuntimeError("Generated demo Pilot-GPS data is disabled. Use the static demo dataset import instead.")
 
 
 class HttpPilotGpsClient(PilotGpsClient):
@@ -276,4 +158,6 @@ class HttpPilotGpsClient(PilotGpsClient):
 
 def get_pilot_client(settings: Settings | None = None) -> PilotGpsClient:
     settings = settings or get_settings()
-    return DemoPilotGpsClient() if settings.use_demo_data else HttpPilotGpsClient(settings)
+    if settings.use_demo_data:
+        raise RuntimeError("Generated demo Pilot-GPS data is disabled. Seed the static demo dataset instead.")
+    return HttpPilotGpsClient(settings)

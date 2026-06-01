@@ -4,7 +4,7 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.config.analytics_sensors import ANALYTICS_SENSORS, TOTAL_ANALYTICS_SENSORS, resolve_analytics_key
+from app.config.analytics_sensors import ANALYTICS_SENSORS, TOTAL_ANALYTICS_SENSORS, resolve_analytics_key_from_candidates
 from app.core.security import decrypt_secret
 from app.db.models import AnalyticsSensorLink, MLResult, SensorReading, SyncLog, User, Vehicle, VehicleSensor, utcnow
 from app.services.pilot_gps.client import HttpPilotGpsClient, PilotGpsClient, get_pilot_client
@@ -16,14 +16,18 @@ from app.services.ratings.rating_calculator import RatingCalculator
 
 class PilotSyncService:
     def __init__(self, client: PilotGpsClient | None = None) -> None:
-        self.client = client or get_pilot_client()
+        self.client = client
         self.vehicle_parser = PilotVehicleParser()
         self.sensor_parser = PilotSensorParser()
+
+    def _require_client(self) -> PilotGpsClient:
+        return self.client or get_pilot_client()
 
     def sync_vehicles(self, db: Session, owner: User) -> dict[str, Any]:
         log = self._start_log(db, "vehicles")
         synced = 0
-        for payload in self.client.list_vehicles():
+        client = self._require_client()
+        for payload in client.list_vehicles():
             parsed = self.vehicle_parser.parse(payload)
             vehicle = db.scalar(select(Vehicle).where(Vehicle.user_id == owner.id, Vehicle.pilot_agent_id == parsed["pilot_agent_id"]))
             if vehicle:
@@ -51,20 +55,33 @@ class PilotSyncService:
     def sync_readings(self, db: Session, owner: User, days: int = 30) -> dict[str, Any]:
         log = self._start_log(db, "readings")
         inserted = 0
+        client = self._require_client()
         for vehicle in db.scalars(select(Vehicle).where(Vehicle.user_id == owner.id)).all():
             if not vehicle.pilot_agent_id:
                 continue
-            if db.scalar(select(SensorReading.id).where(SensorReading.vehicle_id == vehicle.id).limit(1)):
-                continue
-            history = self.client.list_sensor_history(vehicle.pilot_agent_id, days)
+            history = client.list_sensor_history(vehicle.pilot_agent_id, days)
             sensors_by_key = {link.analytics_key: link.sensor for link in vehicle.analytics_links if link.sensor is not None}
+            existing_keys = {
+                self._reading_key(sensor_id, timestamp)
+                for sensor_id, timestamp in db.execute(
+                    select(SensorReading.sensor_id, SensorReading.timestamp).where(SensorReading.vehicle_id == vehicle.id)
+                ).all()
+            }
+            pending_keys: set[tuple[str, datetime]] = set()
             for key, rows in history.items():
-                sensor = sensors_by_key.get(key)
+                analytics_key = resolve_analytics_key_from_candidates(key)
+                if analytics_key is None:
+                    continue
+                sensor = sensors_by_key.get(analytics_key)
                 if not sensor:
                     continue
                 for row in rows:
                     parsed = self.sensor_parser.parse_reading(row)
+                    reading_key = self._reading_key(sensor.id, parsed["timestamp"])
+                    if reading_key in existing_keys or reading_key in pending_keys:
+                        continue
                     db.add(SensorReading(vehicle_id=vehicle.id, sensor_id=sensor.id, **parsed))
+                    pending_keys.add(reading_key)
                     inserted += 1
         self._finish_log(log, "success", {"inserted": inserted})
         db.commit()
@@ -97,12 +114,13 @@ class PilotSyncService:
 
     def import_live_current_snapshot(self, db: Session, owner: User, replace_shared_fleet: bool = False, anonymize: bool = False) -> dict[str, Any]:
         log = self._start_log(db, "live_current_snapshot")
-        vehicles_payload = self.client.list_vehicles()
+        client = self._require_client()
+        vehicles_payload = client.list_vehicles()
         if replace_shared_fleet:
             self._clear_fleet(db, owner)
         anonymized_payloads = self._anonymize_payloads(vehicles_payload) if anonymize else vehicles_payload
         agent_ids = [str(payload.get("agentid") or payload.get("pilot_agent_id") or payload.get("id")) for payload in anonymized_payloads if payload.get("agentid") or payload.get("pilot_agent_id") or payload.get("id")]
-        status_map = self.client.list_current_status(agent_ids)
+        status_map = client.list_current_status(agent_ids)
         imported_vehicles = 0
         imported_sensors = 0
         imported_readings = 0
@@ -280,7 +298,15 @@ class PilotSyncService:
         unmapped_names: list[str] = []
 
         for payload in merged_by_name.values():
-            analytics_key = resolve_analytics_key(str(payload.get("name") or payload.get("description") or ""))
+            raw_json = payload.get("raw_json")
+            raw_payload = raw_json if isinstance(raw_json, dict) else {}
+            analytics_key = resolve_analytics_key_from_candidates(
+                payload.get("fieldname"),
+                payload.get("analytics_key"),
+                raw_payload.get("analytics_key"),
+                payload.get("name"),
+                payload.get("description"),
+            )
             sensor_dict = self.sensor_parser.parse_vehicle_sensor(payload, analytics_key)
             sensor = None
             if sensor_dict["pilot_sensor_id"]:
@@ -317,6 +343,13 @@ class PilotSyncService:
         sensors = db.scalars(select(VehicleSensor).where(VehicleSensor.vehicle_id == vehicle.id)).all()
         sensors_by_external_id = {sensor.pilot_sensor_id: sensor for sensor in sensors if sensor.pilot_sensor_id}
         sensors_by_name = {sensor.name: sensor for sensor in sensors}
+        existing_keys = {
+            self._reading_key(sensor_id, timestamp)
+            for sensor_id, timestamp in db.execute(
+                select(SensorReading.sensor_id, SensorReading.timestamp).where(SensorReading.vehicle_id == vehicle.id)
+            ).all()
+        }
+        pending_keys: set[tuple[str, datetime]] = set()
         inserted = 0
         for payload in sensors_status_payload:
             reading = self.sensor_parser.parse_status_reading(payload)
@@ -330,19 +363,19 @@ class PilotSyncService:
                 sensor = sensors_by_name.get(str(payload.get("name") or ""))
             if sensor is None:
                 continue
-            existing_reading = db.scalar(
-                select(SensorReading.id)
-                .where(SensorReading.vehicle_id == vehicle.id)
-                .where(SensorReading.sensor_id == sensor.id)
-                .where(SensorReading.timestamp == reading["timestamp"])
-                .limit(1)
-            )
-            if existing_reading:
+            reading_key = self._reading_key(sensor.id, reading["timestamp"])
+            if reading_key in existing_keys or reading_key in pending_keys:
                 continue
             db.add(SensorReading(vehicle_id=vehicle.id, sensor_id=sensor.id, **reading))
+            pending_keys.add(reading_key)
             inserted += 1
         db.flush()
         return inserted
+
+    @staticmethod
+    def _reading_key(sensor_id: str, timestamp: datetime) -> tuple[str, datetime]:
+        normalized_timestamp = timestamp.astimezone(UTC).replace(tzinfo=None) if timestamp.tzinfo else timestamp
+        return sensor_id, normalized_timestamp
 
     @staticmethod
     def _start_log(db: Session, sync_type: str) -> SyncLog:

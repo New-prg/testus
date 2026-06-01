@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.security import encrypt_secret, hash_password
 from app.db.models import MLModelRun, MLResult, User, Vehicle
-from app.services.pilot_gps.sync_service import PilotSyncService
 from app.services.telemetry.dataset_importer import DatasetImporter, DatasetProvider, LocalDatasetProvider
 
 
@@ -61,11 +60,8 @@ def seed_demo_data(db: Session) -> dict[str, Any]:
             **result,
         }
     if dataset_path and not dataset_path.exists():
-        print(f"[seed-demo] Demo dataset {dataset_path} is unavailable; falling back to generated demo provider", flush=True)
-    sync = PilotSyncService()
-    _reset_demo_statistics(db, admin)
-    result = sync.sync_all(db, admin, days=DEMO_SEED_DAYS)
-    return {**admin_payload, "source": "demo_pilot_provider", **result}
+        raise ValueError(f"Demo dataset file does not exist: {dataset_path}")
+    raise ValueError("DEMO_DATASET_PATH must be configured for static demo seeding")
 
 
 class DemoDayLimitedProvider(DatasetProvider):
