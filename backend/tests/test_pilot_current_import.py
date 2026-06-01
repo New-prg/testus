@@ -4,7 +4,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config.analytics_sensors import resolve_analytics_key
-from app.core.security import hash_password
+from app.core.security import encrypt_secret, hash_password
 from app.db.models import User, Vehicle
 from app.db.session import Base
 from app.services.pilot_gps.client import PilotGpsClient
@@ -74,11 +74,13 @@ def test_parse_status_reading_parses_numeric_snapshot() -> None:
 
 def test_import_can_replace_demo_fleet_and_anonymize_visible_fields() -> None:
     db = build_session()
-    db.add(User(email="admin@example.com", password_hash=hash_password("admin123"), full_name="Demo Admin", role="admin"))
-    db.add(Vehicle(pilot_agent_id="demo-agent-001", imei="860000000000001", plate_number="DEMO-001", name="Demo vehicle 01", vin="DEMO-VIN-00001", vehicle_type="truck", car_type="KAMAZ", is_active=True, raw_json={"provider": "demo"}))
+    admin = User(email="admin@example.com", login="admin@example.com", password_hash=hash_password("admin123"), pilot_password_encrypted=encrypt_secret("admin123"), full_name="Demo Admin", role="admin", is_demo=True)
+    db.add(admin)
+    db.commit()
+    db.add(Vehicle(user_id=admin.id, pilot_agent_id="demo-agent-001", imei="860000000000001", plate_number="DEMO-001", name="Demo vehicle 01", vin="DEMO-VIN-00001", vehicle_type="truck", car_type="KAMAZ", is_active=True, raw_json={"provider": "demo"}))
     db.commit()
 
-    result = PilotSyncService(FakePilotClient()).import_live_current_snapshot(db, replace_shared_fleet=True, anonymize=True)
+    result = PilotSyncService(FakePilotClient()).import_live_current_snapshot(db, admin, replace_shared_fleet=True, anonymize=True)
     vehicles = db.scalars(select(Vehicle).order_by(Vehicle.name)).all()
 
     assert result["vehicles"] == 1

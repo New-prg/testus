@@ -5,8 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.db.models import SyncLog
+from app.db.models import SyncLog, User
 from app.db.session import get_db
+from app.services.pilot_gps.client import HttpPilotGpsClient
 from app.services.pilot_gps.sync_service import PilotSyncService
 
 
@@ -14,40 +15,58 @@ router = APIRouter(prefix="/pilot/sync", tags=["pilot-sync"], dependencies=[Depe
 
 
 @router.post("/vehicles")
-def sync_vehicles(db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
-    return PilotSyncService().sync_vehicles(db)
+def sync_vehicles(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_admin_user)],
+) -> dict[str, Any]:
+    return PilotSyncService().sync_vehicles(db, current_user)
 
 
 @router.post("/sensors")
-def sync_sensors(db: Annotated[Session, Depends(get_db)]) -> dict[str, Any]:
-    return PilotSyncService().sync_sensors(db)
+def sync_sensors(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_admin_user)],
+) -> dict[str, Any]:
+    return PilotSyncService().sync_sensors(db, current_user)
 
 
 @router.post("/readings")
-def sync_readings(db: Annotated[Session, Depends(get_db)], days: int = 30) -> dict[str, Any]:
-    return PilotSyncService().sync_readings(db, days)
+def sync_readings(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_admin_user)],
+    days: int = 30,
+) -> dict[str, Any]:
+    return PilotSyncService().sync_readings(db, current_user, days)
 
 
 @router.post("/analytics")
-def sync_analytics(db: Annotated[Session, Depends(get_db)], days: int = 30) -> dict[str, Any]:
-    return PilotSyncService().calculate_analytics(db, days)
+def sync_analytics(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_admin_user)],
+    days: int = 30,
+) -> dict[str, Any]:
+    return PilotSyncService().calculate_analytics(db, current_user, days)
 
 
 @router.post("/all")
-def sync_all(db: Annotated[Session, Depends(get_db)], days: int = 30) -> dict[str, Any]:
-    return PilotSyncService().sync_all(db, days)
+def sync_all(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_admin_user)],
+    days: int = 30,
+) -> dict[str, Any]:
+    return PilotSyncService().sync_all(db, current_user, days)
 
 
 @router.post("/current")
 def import_current_snapshot(
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(deps.get_admin_user)],
     replace_shared_fleet: bool = False,
     anonymize: bool = False,
 ) -> dict[str, Any]:
-    from app.services.pilot_gps.client import HttpPilotGpsClient
-
     return PilotSyncService(HttpPilotGpsClient()).import_live_current_snapshot(
         db,
+        current_user,
         replace_shared_fleet=replace_shared_fleet,
         anonymize=anonymize,
     )

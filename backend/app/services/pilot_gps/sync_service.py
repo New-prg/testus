@@ -1,13 +1,13 @@
 from datetime import UTC, datetime, timedelta
-import hashlib
 from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.config.analytics_sensors import ANALYTICS_SENSORS, TOTAL_ANALYTICS_SENSORS, resolve_analytics_key
-from app.db.models import AnalyticsSensorLink, MLResult, SensorReading, SyncLog, Vehicle, VehicleSensor
-from app.services.pilot_gps.client import PilotGpsClient, get_pilot_client
+from app.core.security import decrypt_secret
+from app.db.models import AnalyticsSensorLink, MLResult, SensorReading, SyncLog, User, Vehicle, VehicleSensor, utcnow
+from app.services.pilot_gps.client import HttpPilotGpsClient, PilotGpsClient, get_pilot_client
 from app.services.pilot_gps.sensor_parser import PilotSensorParser
 from app.services.pilot_gps.vehicle_parser import PilotVehicleParser
 from app.services.ratings.metric_calculator import MetricCalculator
@@ -20,17 +20,17 @@ class PilotSyncService:
         self.vehicle_parser = PilotVehicleParser()
         self.sensor_parser = PilotSensorParser()
 
-    def sync_vehicles(self, db: Session) -> dict[str, Any]:
+    def sync_vehicles(self, db: Session, owner: User) -> dict[str, Any]:
         log = self._start_log(db, "vehicles")
         synced = 0
         for payload in self.client.list_vehicles():
             parsed = self.vehicle_parser.parse(payload)
-            vehicle = db.scalar(select(Vehicle).where(Vehicle.pilot_agent_id == parsed["pilot_agent_id"]))
+            vehicle = db.scalar(select(Vehicle).where(Vehicle.user_id == owner.id, Vehicle.pilot_agent_id == parsed["pilot_agent_id"]))
             if vehicle:
                 for key, value in parsed.items():
                     setattr(vehicle, key, value)
             else:
-                vehicle = Vehicle(**parsed)
+                vehicle = Vehicle(user_id=owner.id, **parsed)
                 db.add(vehicle)
                 db.flush()
             self.ensure_sensors_and_links(db, vehicle)
@@ -39,19 +39,19 @@ class PilotSyncService:
         db.commit()
         return {"synced": synced}
 
-    def sync_sensors(self, db: Session) -> dict[str, Any]:
+    def sync_sensors(self, db: Session, owner: User) -> dict[str, Any]:
         log = self._start_log(db, "sensors")
         created = 0
-        for vehicle in db.scalars(select(Vehicle)).all():
+        for vehicle in db.scalars(select(Vehicle).where(Vehicle.user_id == owner.id)).all():
             created += self.ensure_sensors_and_links(db, vehicle)
         self._finish_log(log, "success", {"created": created})
         db.commit()
         return {"created": created}
 
-    def sync_readings(self, db: Session, days: int = 30) -> dict[str, Any]:
+    def sync_readings(self, db: Session, owner: User, days: int = 30) -> dict[str, Any]:
         log = self._start_log(db, "readings")
         inserted = 0
-        for vehicle in db.scalars(select(Vehicle)).all():
+        for vehicle in db.scalars(select(Vehicle).where(Vehicle.user_id == owner.id)).all():
             if not vehicle.pilot_agent_id:
                 continue
             if db.scalar(select(SensorReading.id).where(SensorReading.vehicle_id == vehicle.id).limit(1)):
@@ -70,13 +70,13 @@ class PilotSyncService:
         db.commit()
         return {"inserted": inserted}
 
-    def calculate_analytics(self, db: Session, days: int = 30) -> dict[str, Any]:
+    def calculate_analytics(self, db: Session, owner: User, days: int = 30) -> dict[str, Any]:
         log = self._start_log(db, "analytics")
         metric_calculator = MetricCalculator()
         rating_calculator = RatingCalculator()
         windows = 0
         end = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-        for vehicle in db.scalars(select(Vehicle).where(Vehicle.is_active.is_(True))).all():
+        for vehicle in db.scalars(select(Vehicle).where(Vehicle.user_id == owner.id, Vehicle.is_active.is_(True))).all():
             for offset in range(days):
                 period_start = end - timedelta(days=offset + 1)
                 period_end = end - timedelta(days=offset)
@@ -87,19 +87,19 @@ class PilotSyncService:
         db.commit()
         return {"metric_windows": windows}
 
-    def sync_all(self, db: Session, days: int = 30) -> dict[str, Any]:
+    def sync_all(self, db: Session, owner: User, days: int = 30) -> dict[str, Any]:
         return {
-            "vehicles": self.sync_vehicles(db),
-            "sensors": self.sync_sensors(db),
-            "readings": self.sync_readings(db, days),
-            "analytics": self.calculate_analytics(db, days),
+            "vehicles": self.sync_vehicles(db, owner),
+            "sensors": self.sync_sensors(db, owner),
+            "readings": self.sync_readings(db, owner, days),
+            "analytics": self.calculate_analytics(db, owner, days),
         }
 
-    def import_live_current_snapshot(self, db: Session, replace_shared_fleet: bool = False, anonymize: bool = False) -> dict[str, Any]:
+    def import_live_current_snapshot(self, db: Session, owner: User, replace_shared_fleet: bool = False, anonymize: bool = False) -> dict[str, Any]:
         log = self._start_log(db, "live_current_snapshot")
         vehicles_payload = self.client.list_vehicles()
         if replace_shared_fleet:
-            self._clear_shared_fleet(db)
+            self._clear_fleet(db, owner)
         anonymized_payloads = self._anonymize_payloads(vehicles_payload) if anonymize else vehicles_payload
         agent_ids = [str(payload.get("agentid") or payload.get("pilot_agent_id") or payload.get("id")) for payload in anonymized_payloads if payload.get("agentid") or payload.get("pilot_agent_id") or payload.get("id")]
         status_map = self.client.list_current_status(agent_ids)
@@ -110,12 +110,12 @@ class PilotSyncService:
 
         for payload in anonymized_payloads:
             parsed = self.vehicle_parser.parse(payload)
-            vehicle = db.scalar(select(Vehicle).where(Vehicle.pilot_agent_id == parsed["pilot_agent_id"]))
+            vehicle = db.scalar(select(Vehicle).where(Vehicle.user_id == owner.id, Vehicle.pilot_agent_id == parsed["pilot_agent_id"]))
             if vehicle:
                 for key, value in parsed.items():
                     setattr(vehicle, key, value)
             else:
-                vehicle = Vehicle(**parsed)
+                vehicle = Vehicle(user_id=owner.id, **parsed)
                 db.add(vehicle)
                 db.flush()
             imported_vehicles += 1
@@ -133,10 +133,84 @@ class PilotSyncService:
         return {"vehicles": imported_vehicles, "sensors": imported_sensors, "readings": imported_readings, "unmapped_sensors": unmapped, "replace_shared_fleet": replace_shared_fleet, "anonymize": anonymize}
 
     @staticmethod
-    def _clear_shared_fleet(db: Session) -> None:
-        db.execute(delete(MLResult))
-        db.execute(delete(Vehicle))
+    def _clear_fleet(db: Session, owner: User) -> None:
+        vehicle_ids = select(Vehicle.id).where(Vehicle.user_id == owner.id)
+        db.execute(delete(MLResult).where(MLResult.vehicle_id.in_(vehicle_ids)))
+        db.execute(delete(Vehicle).where(Vehicle.user_id == owner.id))
         db.flush()
+
+    def sync_account_current_snapshot(self, db: Session, owner: User) -> dict[str, Any]:
+        if not owner.pilot_server_address or owner.pilot_node is None or not owner.pilot_password_encrypted:
+            raise ValueError("Pilot-GPS account is not configured")
+        if owner.is_demo:
+            return {"vehicles": 0, "sensors": 0, "readings": 0, "skipped": True}
+        live_client = HttpPilotGpsClient(
+            base_url=owner.pilot_server_address,
+            node=owner.pilot_node,
+            username=owner.login,
+            password=decrypt_secret(owner.pilot_password_encrypted),
+        )
+        result = PilotSyncService(live_client).import_live_current_snapshot(db, owner)
+        self.recalculate_account_windows(db, owner)
+        return result
+
+    def recalculate_account_windows(self, db: Session, owner: User) -> int:
+        metric_calculator = MetricCalculator()
+        rating_calculator = RatingCalculator()
+        windows = 0
+        start_at = owner.sync_started_at or utcnow()
+        current = start_at.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        stop = utcnow().astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        vehicles = db.scalars(select(Vehicle).where(Vehicle.user_id == owner.id, Vehicle.is_active.is_(True))).all()
+        while current < stop:
+            period_end = current + timedelta(days=1)
+            for vehicle in vehicles:
+                metric_window = metric_calculator.calculate_and_store(db, vehicle.id, current, period_end)
+                rating_calculator.calculate_and_store(db, vehicle, metric_window)
+                windows += 1
+            current = period_end
+        db.commit()
+        return windows
+
+    def run_due_account_syncs(self, db: Session, now: datetime | None = None) -> list[dict[str, Any]]:
+        now = now or utcnow()
+        users = db.scalars(select(User).where(User.is_demo.is_(False), User.next_sync_at.is_not(None), User.next_sync_at <= now).order_by(User.next_sync_at.asc())).all()
+        results: list[dict[str, Any]] = []
+        for user in users:
+            user.last_sync_started_at = now
+            user.last_sync_error = None
+            db.commit()
+            try:
+                result = self.sync_account_current_snapshot(db, user)
+                finished_at = utcnow()
+                user.last_sync_completed_at = finished_at
+                user.next_sync_at = self._next_sync_from_anchor(user, finished_at)
+                db.commit()
+                results.append({"user_id": user.id, "status": "success", **result})
+            except Exception as exc:
+                user.last_sync_error = self._safe_sync_error(exc)
+                user.next_sync_at = utcnow() + timedelta(minutes=15)
+                db.commit()
+                results.append({"user_id": user.id, "status": "error", "message": str(exc)})
+        return results
+
+    @staticmethod
+    def _next_sync_from_anchor(owner: User, completed_at: datetime) -> datetime:
+        anchor = owner.sync_started_at or completed_at
+        anchor_utc = anchor.astimezone(UTC) if anchor.tzinfo else anchor.replace(tzinfo=UTC)
+        completed_utc = completed_at.astimezone(UTC) if completed_at.tzinfo else completed_at.replace(tzinfo=UTC)
+        next_sync = anchor_utc
+        while next_sync <= completed_utc:
+            next_sync += timedelta(hours=3)
+        return next_sync
+
+    @staticmethod
+    def _safe_sync_error(exc: Exception) -> str:
+        message = str(exc)
+        lowered = message.lower()
+        if any(token in lowered for token in ("authorization", "password", "token", "basic ", "bearer ")):
+            return "Pilot-GPS sync failed"
+        return message[:1000]
 
     @staticmethod
     def _anonymize_payloads(vehicles_payload: list[dict[str, Any]]) -> list[dict[str, Any]]:
