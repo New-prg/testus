@@ -239,7 +239,7 @@ function LatestRunCard({ run }: { run: MlModelRun | undefined }) {
           </div>
         </>
       ) : (
-        <p className="mt-3 text-sm leading-6 text-cream/80">История запусков пуста. Нажмите «Пересчитать ML», чтобы создать первые записи в /api/ml/model-comparison.</p>
+        <p className="mt-3 text-sm leading-6 text-cream/80">История запусков пуста. Нажмите «Пересчитать ML», чтобы добавить первые результаты.</p>
       )}
     </article>
   );
@@ -247,7 +247,7 @@ function LatestRunCard({ run }: { run: MlModelRun | undefined }) {
 
 function ModelRunsSection({ runs }: { runs: MlModelRun[] }) {
   if (!runs.length) {
-    return <EmptyBlock title="Запусков моделей пока нет" message="Эндпоинт /api/ml/model-comparison вернул пустой список. После пересчёта здесь появятся anomaly, cluster и forecast модели." />;
+    return <EmptyBlock title="Запусков моделей пока нет" message="После пересчёта здесь появятся результаты по аномалиям, кластерам и прогнозам." />;
   }
 
   return (
@@ -305,17 +305,17 @@ function AnomaliesSection({ anomalies, onSelectVehicle }: { anomalies: MlAnomaly
   const visibleAnomalies = anomalies.filter((anomaly) => anomaly.label === 'anomaly');
 
   if (!visibleAnomalies.length) {
-    return <EmptyBlock title="Аномалии не обнаружены" message="/api/ml/anomalies не вернул отклонения. Это может означать стабильный демо-набор или ещё не выполненный ML-пересчёт." />;
+    return <EmptyBlock title="Аномалии не обнаружены" message="Отклонений нет или ML ещё не пересчитан." />;
   }
 
   return (
     <section className="surface-card p-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="section-label">Аномалии и причины</p>
-          <h2 className="mt-2 font-display text-2xl text-cream">Русские объяснения отклонений</h2>
+          <p className="section-label">Аномалии</p>
+          <h2 className="mt-2 font-display text-2xl text-cream">Объяснения отклонений</h2>
         </div>
-        <p className="text-sm text-muted">Показаны только строки с label=anomaly</p>
+        <p className="text-sm text-muted">Показаны только аномалии</p>
       </div>
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         {visibleAnomalies.slice(0, 6).map((anomaly) => (
@@ -326,7 +326,7 @@ function AnomaliesSection({ anomalies, onSelectVehicle }: { anomalies: MlAnomaly
                 <h3 className="mt-2 text-lg font-bold text-cream">{vehicleLabel(anomaly.vehicle_id)}</h3>
               </div>
               <span className="rounded-pill border border-danger/35 bg-danger/20 px-3 py-1 text-xs font-bold text-danger">
-                score {formatNumber(anomaly.score, 3)}
+                оценка {formatNumber(anomaly.score, 3)}
               </span>
             </div>
             <p className="mt-4 text-sm leading-6 text-cream/80">{anomaly.explanation.summary_ru}</p>
@@ -354,7 +354,7 @@ function AnomaliesSection({ anomalies, onSelectVehicle }: { anomalies: MlAnomaly
 
 function ClustersSection({ clusters }: { clusters: ClusterSummary[] }) {
   if (!clusters.length) {
-    return <EmptyBlock title="Кластеры пока не рассчитаны" message="/api/ml/clusters вернул пустой список. Кластерные профили появятся после успешного пересчёта с достаточным числом строк." />;
+    return <EmptyBlock title="Кластеры пока не рассчитаны" message="После пересчёта здесь появятся профили поведения." />;
   }
 
   return (
@@ -392,17 +392,17 @@ function ClustersSection({ clusters }: { clusters: ClusterSummary[] }) {
 
 function ForecastsSection({ forecasts }: { forecasts: MlForecastResult[] }) {
   if (!forecasts.length) {
-    return <EmptyBlock title="Прогнозов пока нет" message="/api/ml/forecasts не вернул строки. Для прогноза нужны исторические рейтинги минимум по нескольким окнам." />;
+    return <EmptyBlock title="Прогнозов пока нет" message="Нужна история рейтингов по нескольким окнам." />;
   }
 
   return (
     <section className="surface-card p-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="section-label">Прогноз рейтинга</p>
-          <h2 className="mt-2 font-display text-2xl text-cream">Факт против predicted</h2>
+          <p className="section-label">Прогнозы по двум моделям</p>
+          <h2 className="mt-2 font-display text-2xl text-cream">Факт и прогноз</h2>
         </div>
-        <p className="text-sm text-muted">moving_average и random_forest из /api/ml/forecasts</p>
+        <p className="text-sm text-muted">Прогнозы по двум моделям</p>
       </div>
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
           {forecasts.slice(0, 6).map((forecast) => (
@@ -416,8 +416,8 @@ function ForecastsSection({ forecasts }: { forecasts: MlForecastResult[] }) {
             </div>
             <div className="mt-5 space-y-4">
               <ScoreBar label="Факт" value={forecast.baseline_final_rating} tone="success" />
-              <ScoreBar label="Moving average predicted" value={forecast.moving_average_forecast} tone="brass" />
-              <ScoreBar label="Random forest predicted" value={forecast.random_forest_forecast} tone="signal" />
+              <ScoreBar label="Прогноз: moving average" value={forecast.moving_average_forecast} tone="brass" />
+              <ScoreBar label="Прогноз: random forest" value={forecast.random_forest_forecast} tone="signal" />
             </div>
           </article>
         ))}
@@ -428,11 +428,11 @@ function ForecastsSection({ forecasts }: { forecasts: MlForecastResult[] }) {
 
 function VehicleExplanationPanel({ state, vehicleId }: { state: ExplanationState; vehicleId: string }) {
   if (!vehicleId) {
-    return <EmptyBlock title="Выберите машину для детализации" message="Нажмите «Показать детализацию» в карточке аномалии, чтобы загрузить /api/ml/explanations/{vehicle_id}." />;
+    return <EmptyBlock title="Выберите машину" message="Нажмите «Показать детализацию» в карточке аномалии." />;
   }
 
   if (state.isLoading) {
-    return <LoadingState message="Загружаем ML-объяснения по машине..." />;
+    return <LoadingState message="Загружаем объяснения..." />;
   }
 
   if (state.error) {
@@ -450,18 +450,18 @@ function VehicleExplanationPanel({ state, vehicleId }: { state: ExplanationState
       <h2 className="mt-2 font-display text-2xl text-cream">{vehicleLabel(vehicleId)}</h2>
       <div className="mt-5 grid gap-4 lg:grid-cols-3">
         <article className="rounded-3xl border border-danger/25 bg-danger/10 p-4">
-          <p className="text-xs font-bold uppercase tracking-widest text-danger">anomaly</p>
+          <p className="text-xs font-bold uppercase tracking-widest text-danger">аномалия</p>
           <p className="mt-3 text-sm leading-6 text-cream/80">
-            {anomaly?.explanation.top_factors[0]?.message_ru ?? anomaly?.explanation.summary_ru ?? 'Для этой машины нет сохранённой anomaly-строки.'}
+            {anomaly?.explanation.top_factors[0]?.message_ru ?? anomaly?.explanation.summary_ru ?? 'Нет данных по аномалии.'}
           </p>
         </article>
         <article className="rounded-3xl border border-brass/25 bg-brass/10 p-4">
-          <p className="text-xs font-bold uppercase tracking-widest text-brass">cluster</p>
+          <p className="text-xs font-bold uppercase tracking-widest text-brass">кластер</p>
           <h3 className="mt-3 font-bold text-cream">{cluster?.cluster ?? '—'}</h3>
-          <p className="mt-2 text-sm leading-6 text-cream/80">{cluster?.profile_description_ru ?? 'Для этой машины нет сохранённого cluster-профиля.'}</p>
+          <p className="mt-2 text-sm leading-6 text-cream/80">{cluster?.profile_description_ru ?? 'Нет профиля кластера.'}</p>
         </article>
         <article className="rounded-3xl border border-signal/25 bg-signal/10 p-4">
-          <p className="text-xs font-bold uppercase tracking-widest text-signal">forecast</p>
+          <p className="text-xs font-bold uppercase tracking-widest text-signal">прогноз</p>
           <p className="mt-3 text-sm leading-6 text-cream/80">
             Факт {formatNumber(forecast?.baseline_final_rating, 1)} · MA {formatNumber(forecast?.moving_average_forecast, 1)} · RF {formatNumber(forecast?.random_forest_forecast, 1)}
           </p>
@@ -609,7 +609,7 @@ export function MlAnalyticsPage() {
             <p className="section-label">ML-аналитика</p>
             <h1 className="mt-3 font-display text-4xl text-cream">Модели качества вождения</h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-muted">
-              Тезисная витрина объединяет /api/ml/model-comparison, anomalies, clusters, forecasts и explanations: здесь видно, когда обучались модели, почему машина стала аномалией и какой рейтинг ожидается дальше.
+              Здесь собраны сравнение моделей, аномалии, кластеры и прогнозы по автопарку.
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row lg:justify-end">
@@ -619,7 +619,7 @@ export function MlAnalyticsPage() {
               </button>
             ) : (
               <button className="secondary-action" type="button" disabled>
-                Пересчёт доступен администратору
+                Только для администратора
               </button>
             )}
             <button className="secondary-action" type="button" onClick={() => void loadMlData()} disabled={isLoading || isRecalculating}>
@@ -627,7 +627,7 @@ export function MlAnalyticsPage() {
             </button>
           </div>
         </div>
-        {!canRecalculate ? <p className="mt-5 rounded-2xl border border-warning/35 bg-warning/10 px-4 py-3 text-sm text-warning">Пересчёт ML-моделей выполняется только администратором. Остальные пользователи могут просматривать уже сохранённые результаты.</p> : null}
+        {!canRecalculate ? <p className="mt-5 rounded-2xl border border-warning/35 bg-warning/10 px-4 py-3 text-sm text-warning">Пересчёт ML доступен только администратору. Остальные пользователи видят сохранённые результаты.</p> : null}
         {actionMessage ? <p className="mt-5 rounded-2xl border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">{actionMessage}</p> : null}
       </section>
 
@@ -638,7 +638,7 @@ export function MlAnalyticsPage() {
         <div className="surface-card p-5">
           <p className="section-label">Аномалии</p>
           <p className="mt-3 font-display text-4xl text-danger">{visibleAnomalyCount}</p>
-          <p className="mt-2 text-sm text-muted">машин с label=anomaly</p>
+          <p className="mt-2 text-sm text-muted">машин с аномалиями</p>
         </div>
         <div className="surface-card p-5">
           <p className="section-label">Кластеры</p>
@@ -648,14 +648,14 @@ export function MlAnalyticsPage() {
         <div className="surface-card p-5">
           <p className="section-label">Прогнозы</p>
           <p className="mt-3 font-display text-4xl text-signal">{data.forecasts.length}</p>
-          <p className="mt-2 text-sm text-muted">actual vs predicted строк</p>
+          <p className="mt-2 text-sm text-muted">строк с прогнозом</p>
         </div>
       </section>
 
       {!hasAnyData ? (
         <EmptyState
           title="ML-результаты ещё не рассчитаны"
-          message={canRecalculate ? 'Нажмите «Пересчитать ML», чтобы backend выполнил anomaly, cluster и forecast пайплайны и сохранил результаты для этой страницы.' : 'Ожидаются сохранённые результаты ML-пересчёта. Выполнить пересчёт может только администратор.'}
+          message={canRecalculate ? 'Нажмите «Пересчитать ML», чтобы обновить модели и сохранить результаты для этой страницы.' : 'Здесь появятся сохранённые результаты после ML-пересчёта администратора.'}
           action={canRecalculate ? <button className="primary-action" type="button" onClick={handleRecalculate} disabled={isRecalculating}>{isRecalculating ? 'Пересчитываем...' : 'Пересчитать ML'}</button> : undefined}
         />
       ) : null}

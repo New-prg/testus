@@ -15,6 +15,17 @@ const periodOptions: Array<{ value: DashboardPeriod; label: string }> = [
   { value: 'quarter', label: 'Квартал' },
 ];
 
+const periodLabels: Record<DashboardPeriod, string> = {
+  day: 'день',
+  week: 'неделю',
+  month: 'месяц',
+  quarter: 'квартал',
+};
+
+function periodLabel(period: DashboardPeriod | string): string {
+  return period in periodLabels ? periodLabels[period as DashboardPeriod] : period;
+}
+
 function isVehicleReport(report: ActiveReport): report is VehicleReport {
   return 'vehicle' in report;
 }
@@ -93,12 +104,12 @@ export function ReportsPage() {
 
   const headline = useMemo(() => {
     if (!report) {
-      return 'Выберите тип отчёта и период, чтобы загрузить текстовые выводы с бекэнда.';
+      return 'Выберите тип отчёта и период, чтобы загрузить выводы.';
     }
     if (isVehicleReport(report)) {
-      return `${report.vehicle.plate_number}: рейтинг ${report.summary.rating.toFixed(1)} за период ${report.period}, расход ${report.summary.fuel_per_100km.toFixed(1)} л/100 км и готовность аналитики ${report.summary.analytics_readiness_percent.toFixed(0)}%.`;
+      return `${report.vehicle.plate_number}: рейтинг ${report.summary.rating.toFixed(1)}, расход ${report.summary.fuel_per_100km.toFixed(1)} л/100 км, готовность ${report.summary.analytics_readiness_percent.toFixed(0)}%.`;
     }
-    return `Отчёт по автопарку за период ${report.period}: ${report.summary.vehicles_count} машин, средний рейтинг ${report.summary.fleet_rating.toFixed(1)}, аномалий ${report.summary.anomaly_vehicles_count}.`;
+      return `${report.summary.vehicles_count} машин, средний рейтинг ${report.summary.fleet_rating.toFixed(1)}, аномалий ${report.summary.anomaly_vehicles_count} за ${periodLabel(report.period)}.`;
   }, [report]);
 
   function handleObjectTypeChange(value: ReportObjectType) {
@@ -146,7 +157,7 @@ export function ReportsPage() {
             <p className="section-label">Отчёты и выводы</p>
             <h1 className="mt-3 font-display text-4xl text-cream">Отчёты</h1>
             <p className="mt-3 text-sm leading-6 text-muted">
-              Выберите отчёт по автопарку или по машине, задайте период, изучите выводы бекэнда и выгрузите тот же отчёт в CSV.
+              Выберите отчёт, период и скачайте CSV при необходимости.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
@@ -206,7 +217,7 @@ export function ReportsPage() {
       {rows.length ? (
         <ReportsTable rows={rows} />
       ) : (
-        <EmptyState title="Для выбранного отчёта нет строк" message="Выбранный эндпоинт отчёта не вернул строки сравнения машин. Попробуйте другой период или другой объект отчёта." />
+        <EmptyState title="Для этого отчёта нет данных" message="Попробуйте другой период или другой тип отчёта." />
       )}
     </div>
   );

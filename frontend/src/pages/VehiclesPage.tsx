@@ -114,7 +114,7 @@ export function VehiclesPage() {
       {filteredVehicles.length ? (
         <VehiclesTable vehicles={filteredVehicles} sortKey={sortState.key} sortDirection={sortState.direction} onSort={handleSort} />
       ) : (
-        <EmptyState title="По этому запросу машин не найдено" message="Поиск выполняется только по полям plate_number и name. Очистите фильтр или синхронизируйте машины, чтобы заполнить реестр." />
+        <EmptyState title="По запросу ничего не найдено" message="Поиск работает по номеру и названию. Очистите фильтр или обновите реестр." />
       )}
     </div>
   );

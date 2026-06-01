@@ -91,7 +91,7 @@ export function DashboardPage() {
     return (
       <EmptyState
         title="Для недельного дашборда пока нет данных"
-        message="Интерфейс использует /api/dashboard/summary, /timeseries, /comparison и /problem-vehicles с period=week. Выполните сидирование или расчёт аналитики, чтобы заполнить демо-данные."
+        message="Сейчас нет недельных данных. Загрузите демо-данные или пересчитайте аналитику."
         action={<button className="primary-action" type="button" onClick={() => void ensureDashboard(period, { force: true })}>Обновить дашборд</button>}
       />
     );
@@ -174,7 +174,7 @@ export function DashboardPage() {
         <ComparisonBarChart rows={data.comparison} />
         <div className="surface-card p-5">
           <p className="section-label">Лучшие и проблемные машины</p>
-          <h2 className="mt-2 font-display text-2xl text-cream">Ключевые точки внимания</h2>
+          <h2 className="mt-2 font-display text-2xl text-cream">Главное внимание</h2>
           <div className="mt-5 grid gap-4 lg:grid-cols-2">
             {bestVehicles.map((vehicle) => <ProblemVehicleCard key={`best-${vehicle.vehicle_id}`} vehicle={vehicle} label="Best" />)}
             {worstVehicles.map((vehicle) => <ProblemVehicleCard key={`worst-${vehicle.vehicle_id}`} vehicle={vehicle} label="Worst" />)}
