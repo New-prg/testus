@@ -22,11 +22,11 @@ services:
       JWT_SECRET_KEY: change-me-in-real-deployments-please-rotate
       PILOT_CREDENTIALS_KEY: change-me-in-real-deployments-please-rotate
       USE_DEMO_DATA: "true"
-      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_long.csv
-      DEMO_SENSOR_PROFILE_PATH: /demo-dataset/sensor_profile_canonical.json
+      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_wide_demo.csv
+      DEMO_SENSOR_PROFILE_PATH: ""
       DEMO_DATASET_ROW_LIMIT: "-1"
     volumes:
-      - ../../../dataset/pilot_sensor_dataset_2026-05-31_reduction:/demo-dataset:ro
+      - ../telematics_reduced_wide_demo.csv:/demo-dataset/telematics_reduced_wide_demo.csv:ro
     depends_on:
       db:
         condition: service_healthy
@@ -39,13 +39,13 @@ services:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/diplom2
       JWT_SECRET_KEY: change-me-in-real-deployments-please-rotate
       USE_DEMO_DATA: "true"
-      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_long.csv
-      DEMO_SENSOR_PROFILE_PATH: /demo-dataset/sensor_profile_canonical.json
+      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_wide_demo.csv
+      DEMO_SENSOR_PROFILE_PATH: ""
       DEMO_DATASET_ROW_LIMIT: "-1"
     ports:
       - "8000:8000"
     volumes:
-      - ../../../dataset/pilot_sensor_dataset_2026-05-31_reduction:/demo-dataset:ro
+      - ../telematics_reduced_wide_demo.csv:/demo-dataset/telematics_reduced_wide_demo.csv:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -58,11 +58,11 @@ services:
       JWT_SECRET_KEY: change-me-in-real-deployments-please-rotate
       PILOT_CREDENTIALS_KEY: change-me-in-real-deployments-please-rotate
       USE_DEMO_DATA: "true"
-      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_long.csv
-      DEMO_SENSOR_PROFILE_PATH: /demo-dataset/sensor_profile_canonical.json
+      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_wide_demo.csv
+      DEMO_SENSOR_PROFILE_PATH: ""
       DEMO_DATASET_ROW_LIMIT: "-1"
     volumes:
-      - ../../../dataset/pilot_sensor_dataset_2026-05-31_reduction:/demo-dataset:ro
+      - ../telematics_reduced_wide_demo.csv:/demo-dataset/telematics_reduced_wide_demo.csv:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

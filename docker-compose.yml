@@ -23,11 +23,11 @@ services:
     environment:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change_me}
       PILOT_CREDENTIALS_KEY: ${PILOT_CREDENTIALS_KEY:-change_me_too}
-      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_long.csv
-      DEMO_SENSOR_PROFILE_PATH: /demo-dataset/sensor_profile_canonical.json
+      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_wide_demo.csv
+      DEMO_SENSOR_PROFILE_PATH: ""
       DEMO_DATASET_ROW_LIMIT: "-1"
     volumes:
-      - ../../dataset/pilot_sensor_dataset_2026-05-31_reduction:/demo-dataset:ro
+      - ./telematics_reduced_wide_demo.csv:/demo-dataset/telematics_reduced_wide_demo.csv:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,11 +42,11 @@ services:
     environment:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change_me}
       PILOT_CREDENTIALS_KEY: ${PILOT_CREDENTIALS_KEY:-change_me_too}
-      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_long.csv
-      DEMO_SENSOR_PROFILE_PATH: /demo-dataset/sensor_profile_canonical.json
+      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_wide_demo.csv
+      DEMO_SENSOR_PROFILE_PATH: ""
       DEMO_DATASET_ROW_LIMIT: "-1"
     volumes:
-      - ../../dataset/pilot_sensor_dataset_2026-05-31_reduction:/demo-dataset:ro
+      - ./telematics_reduced_wide_demo.csv:/demo-dataset/telematics_reduced_wide_demo.csv:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -63,11 +63,11 @@ services:
     environment:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change_me}
       PILOT_CREDENTIALS_KEY: ${PILOT_CREDENTIALS_KEY:-change_me_too}
-      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_long.csv
-      DEMO_SENSOR_PROFILE_PATH: /demo-dataset/sensor_profile_canonical.json
+      DEMO_DATASET_PATH: /demo-dataset/telematics_reduced_wide_demo.csv
+      DEMO_SENSOR_PROFILE_PATH: ""
       DEMO_DATASET_ROW_LIMIT: "-1"
     volumes:
-      - ../../dataset/pilot_sensor_dataset_2026-05-31_reduction:/demo-dataset:ro
+      - ./telematics_reduced_wide_demo.csv:/demo-dataset/telematics_reduced_wide_demo.csv:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
